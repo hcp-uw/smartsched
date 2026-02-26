@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+/* import { useEffect, useState } from 'react'
 import FeaturedImages from './components/FeaturedImages/FeaturedImages'
 import DrawingCanvas from './components/DrawingCanvas/DrawingCanvas'
 import { getMessage } from './services/message';
@@ -55,4 +55,16 @@ const App = () => {
 // ```javascript
 // import Root from './App'
 // ```
-export default App
+export default App */
+
+import Calendar from "./components/calendar/Calendar";
+
+function App() {
+  return (
+    <div className="w-screen h-screen">
+      <Calendar />
+    </div>
+  );
+}
+
+export default App;
