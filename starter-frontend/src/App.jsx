@@ -1,58 +1,102 @@
 import { useEffect, useState } from 'react'
-import FeaturedImages from './components/FeaturedImages/FeaturedImages'
-import DrawingCanvas from './components/DrawingCanvas/DrawingCanvas'
-import { getMessage } from './services/message';
+import FullCalendar from '@fullcalendar/react'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import interactionPlugin from '@fullcalendar/interaction'
 import './App.css'
 
-// The App component is the root component of the application.
+const API_BASE = 'http://localhost:3001/api'
+
 const App = () => {
+    const [events, setEvents] = useState([])
+    const [showModal, setShowModal] = useState(false)
+    const [newEvent, setNewEvent] = useState({ title: '', start: '', end: '' })
+    const [error, setError] = useState('')
 
-  // The App component uses the `useState` hook to define a
-  // state variable `message` and a function `setMessage` to update it.
-  // The initial value of `message` is an empty string, and
-  // calling `setMessage` will update the value of `message`,
-  // and trigger a re-render of the component.
-  const [message, setMessage] = useState('')
+    useEffect(() => {
+        fetch(`${API_BASE}/events`)
+            .then(res => res.json())
+            .then(data => setEvents(data.events))
+    }, [])
 
-  // The `useEffect` hook runs the callback function passed to it.
-  // The second argument is the dependency array, which is an array of
-  // variables that, when changed, will trigger the callback function.
-  // Given an empty array, the callback function will only run once,
-  // when the component is first rendered.
-  useEffect(() => {
-    // The `getMessage` function is defined in the `services/message.js` file.
-    // It is an asynchronous function that returns a promise, since it sends
-    // an HTTP request to the server. In order to see the message, we need to
-    // make sure our server is running.
-    getMessage().then(message => setMessage(message))
-  }, [])
+    const handleDateClick = (info) => {
+        setNewEvent({ title: '', start: info.dateStr + 'T09:00', end: info.dateStr + 'T10:00' })
+        setShowModal(true)
+    }
 
-  // React components return JSX, which is a syntax extension for JavaScript.
-  // It looks a lot like HTML, with some key differences. For example, the
-  // `className` attribute is used instead of `class` to define a CSS class.
-  // One of the most powerful features of JSX is that it allows you to embed
-  // JavaScript expressions inside braces `{}`. This allows you to use variables
-  // and expressions to define the structure of your UI, including stateful
-  // values that will not only be displayed, but also automatically re-rendered
-  return (
-    <div className='home-page'>
-      <FeaturedImages/>
-      <p className='message'>{message}</p>
-      <DrawingCanvas />
-    </div>
-  )
+    const handleSubmit = async () => {
+        if (!newEvent.title) { setError('Title is required'); return }
+        const res = await fetch(`${API_BASE}/events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newEvent)
+        })
+        const data = await res.json()
+        setEvents(prev => [...prev, data.event])
+        setShowModal(false)
+        setError('')
+    }
+
+    const handleDelete = async (clickInfo) => {
+        if (!confirm(`Delete "${clickInfo.event.title}"?`)) return
+        await fetch(`${API_BASE}/events/${clickInfo.event.id}`, { method: 'DELETE' })
+        setEvents(prev => prev.filter(e => e.id !== clickInfo.event.id))
+    }
+
+    return (
+        <div style={{ padding: '24px', fontFamily: 'sans-serif' }}>
+            <h1>SmartSched</h1>
+
+            <FullCalendar
+                plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+                initialView="timeGridWeek"
+                headerToolbar={{
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek,timeGridDay'
+                }}
+                events={events}
+                dateClick={handleDateClick}
+                eventClick={handleDelete}
+                height="80vh"
+            />
+
+            {showModal && (
+                <div style={overlay}>
+                    <div style={modal}>
+                        <h2>Add Event</h2>
+                        {error && <p style={{ color: 'red' }}>{error}</p>}
+                        <input
+                            placeholder="Title"
+                            value={newEvent.title}
+                            onChange={e => setNewEvent({ ...newEvent, title: e.target.value })}
+                            style={input}
+                        />
+                        <label>Start</label>
+                        <input type="datetime-local" value={newEvent.start}
+                               onChange={e => setNewEvent({ ...newEvent, start: e.target.value })} style={input} />
+                        <label>End</label>
+                        <input type="datetime-local" value={newEvent.end}
+                               onChange={e => setNewEvent({ ...newEvent, end: e.target.value })} style={input} />
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                            <button onClick={handleSubmit}>Add</button>
+                            <button onClick={() => setShowModal(false)}>Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    )
 }
 
-// The App component is the default export of this module, and it is imported
-// in the `index.js` file in the same directory, which is the entry point of
-// the application. This is the component that will be rendered by default
-// when the application is started.
-//
-// Note that exporting something as "default" means that when you import it
-// in another file, you can choose the name of the imported module. For example,
-// you could import this component in another file and name it `Root`:
-//
-// ```javascript
-// import Root from './App'
-// ```
+const overlay = {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+}
+const modal = {
+    background: 'white', padding: '24px', borderRadius: '8px',
+    display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '300px'
+}
+const input = { padding: '8px', fontSize: '14px', borderRadius: '4px', border: '1px solid #ccc' }
+
 export default App
