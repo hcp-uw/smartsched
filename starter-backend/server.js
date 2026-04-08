@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js'
+
 const express = require("express")
 const cors = require("cors")
 const { unknownEndpoint } = require('./middleware');
@@ -5,6 +7,12 @@ const eventsRouter = require("./routes/events");
 
 // create your express application
 const app = express();
+
+// adding supabase project url & anon key
+const supabaseUrl = process.env.SUPABASE_URL
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // enable json parsing
 app.use(express.json());
