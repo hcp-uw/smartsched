@@ -11,12 +11,23 @@ let events = [
     },
 ];
 
-// GET /api/events
+// GET all events
 router.get("/", (req, res) => {
     res.json({ events });
 });
 
-// POST /api/events
+// GET single event
+router.get("/:id", (req, res) => {
+    const event = events.find(e => e.id === req.params.id);
+
+    if (!event) {
+        return res.status(404).json({ error: "Event not found" });
+    }
+
+    res.json(event);
+});
+
+// POST create event
 router.post("/", (req, res) => {
     const { title, start, end } = req.body;
 
@@ -34,7 +45,21 @@ router.post("/", (req, res) => {
     };
 
     events.push(newEvent);
+
     res.status(201).json({ event: newEvent });
+});
+
+// DELETE event
+router.delete("/:id", (req, res) => {
+    const index = events.findIndex(e => e.id === req.params.id);
+
+    if (index === -1) {
+        return res.status(404).json({ error: "Event not found" });
+    }
+
+    events.splice(index, 1);
+
+    res.status(204).send();
 });
 
 module.exports = router;

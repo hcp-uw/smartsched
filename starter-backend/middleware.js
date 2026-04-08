@@ -4,3 +4,17 @@ const unknownEndpoint = (req, res) => {
 }
 
 module.exports = { unknownEndpoint }
+
+const validateEvent = (req, res, next) => {
+    const { title, start, end } = req.body;
+
+    if (!title || !start || !end) {
+        return res.status(400).json({
+            error: "Event must include title, start, and end time"
+        });
+    }
+
+    next();
+};
+
+module.exports = validateEvent;
