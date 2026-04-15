@@ -1,4 +1,7 @@
-const express = require("express");
+import express from "express"
+import { authMiddleware } from "../middleware.js"
+
+//const express = require("express");
 const router = express.Router();
 
 // temporary in-memory events list
@@ -12,12 +15,12 @@ let events = [
 ];
 
 // GET all events
-router.get("/", (req, res) => {
+router.get("/", authMiddleware, (req, res) => {
     res.json({ events });
 });
 
 // GET single event
-router.get("/:id", (req, res) => {
+router.get("/:id", authMiddleware, (req, res) => {
     const event = events.find(e => e.id === req.params.id);
 
     if (!event) {
@@ -28,7 +31,7 @@ router.get("/:id", (req, res) => {
 });
 
 // POST create event
-router.post("/", (req, res) => {
+router.post("/", authMiddleware, (req, res) => {
     const { title, start, end } = req.body;
 
     if (!title || !start || !end) {
@@ -50,7 +53,7 @@ router.post("/", (req, res) => {
 });
 
 // DELETE event
-router.delete("/:id", (req, res) => {
+router.delete("/:id", authMiddleware, (req, res) => {
     const index = events.findIndex(e => e.id === req.params.id);
 
     if (index === -1) {
@@ -62,4 +65,5 @@ router.delete("/:id", (req, res) => {
     res.status(204).send();
 });
 
-module.exports = router;
+//module.exports = router;
+export default router
