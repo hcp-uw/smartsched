@@ -4,6 +4,7 @@ import dayGridPlugin from '@fullcalendar/daygrid'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import './App.css'
+import { supabase } from './supabaseClient'
 
 const API_BASE = 'http://localhost:3001/api'
 
@@ -12,11 +13,32 @@ const App = () => {
     const [showModal, setShowModal] = useState(false)
     const [newEvent, setNewEvent] = useState({ title: '', start: '', end: '' })
     const [error, setError] = useState('')
+    const [session, setSession] = useState(null)
 
+    // get supabase token
+    async function getToken() {
+        const { data } = await supabase.auth.getSession()
+        return data.session?.access_token
+    }
+
+    // useEffect(() => {
+    //     fetch(`${API_BASE}/events`)
+    //         .then(res => res.json())
+    //         .then(data => setEvents(data.events))
+    // }, [])
+    // modified to get supabase token
     useEffect(() => {
-        fetch(`${API_BASE}/events`)
-            .then(res => res.json())
-            .then(data => setEvents(data.events))
+        async function loadEvents() {
+            const token = await getToken()
+            const res = await fetch(`${API_BASE}/events`, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            })
+            const data = await res.json()
+            setEvents(data.events || [])
+        }
+        loadEvents()
     }, [])
 
     const handleDateClick = (info) => {
@@ -24,11 +46,31 @@ const App = () => {
         setShowModal(true)
     }
 
+    // const handleSubmit = async () => {
+    //     if (!newEvent.title) { setError('Title is required'); return }
+    //     const res = await fetch(`${API_BASE}/events`, {
+    //         method: 'POST',
+    //         headers: { 'Content-Type': 'application/json' },
+    //         body: JSON.stringify(newEvent)
+    //     })
+    //     const data = await res.json()
+    //     setEvents(prev => [...prev, data.event])
+    //     setShowModal(false)
+    //     setError('')
+    // }
+    // modified with supabase token
     const handleSubmit = async () => {
-        if (!newEvent.title) { setError('Title is required'); return }
+        if (!newEvent.title) {
+            setError('Title is required')
+            return
+        }
+        const token = await getToken()
         const res = await fetch(`${API_BASE}/events`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+            },
             body: JSON.stringify(newEvent)
         })
         const data = await res.json()
@@ -37,15 +79,68 @@ const App = () => {
         setError('')
     }
 
+    // const handleDelete = async (clickInfo) => {
+    //     if (!confirm(`Delete "${clickInfo.event.title}"?`)) return
+    //     await fetch(`${API_BASE}/events/${clickInfo.event.id}`, { method: 'DELETE' })
+    //     setEvents(prev => prev.filter(e => e.id !== clickInfo.event.id))
+    // }
+    // modified with supabase token
     const handleDelete = async (clickInfo) => {
         if (!confirm(`Delete "${clickInfo.event.title}"?`)) return
-        await fetch(`${API_BASE}/events/${clickInfo.event.id}`, { method: 'DELETE' })
+
+        const token = await getToken()
+        await fetch(`${API_BASE}/events/${clickInfo.event.id}`, {
+            method: 'DELETE',
+            headers: {
+            Authorization: `Bearer ${token}`
+            }
+        })
         setEvents(prev => prev.filter(e => e.id !== clickInfo.event.id))
+    }
+
+    // google oauth
+    function loginWithGoogle() {
+        supabase.auth.signInWithOAuth({
+            provider: 'google'
+        })
+    }
+
+    useEffect(() => {
+    // Get current session
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+    })
+
+    // Listen for login/logout changes
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session)
+      }
+    )
+        return () => listener.subscription.unsubscribe()
+    }, [])
+
+    async function callBackend() {
+        const { data } = await supabase.auth.getSession()
+        const token = data.session?.access_token
+
+        const res = await fetch(`${API_BASE}/events`, {
+            headers: {
+            Authorization: `Bearer ${token}`
+            }
+        })
+
+        const result = await res.json()
+        console.log(result)
     }
 
     return (
         <div style={{ padding: '24px', fontFamily: 'sans-serif' }}>
             <h1>SmartSched</h1>
+
+            <button onClick={loginWithGoogle}>
+                Login with Google
+            </button>
 
             <FullCalendar
                 plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
