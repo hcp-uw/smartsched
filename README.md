@@ -1,58 +1,142 @@
-# Node.js (React, Express) Project Starter ✅
+# SmartSched 📅
 
-A simple template repository with a React frontend and Express backend for quickly starting new full-stack projects.
+An AI-powered scheduling assistant designed to help college students manage their time effectively. SmartSched integrates class schedules, assignments, and personal preferences to automatically generate an optimized weekly plan that balances study time, rest, and deadlines.
 
-## Prerequisites ‼️
+---
 
-To use this template, you need to have the following installed on your machine:
+## Tech Stack
 
-- Node.js 
-- npm 
+**Frontend:** React, Vite, Tailwind CSS, FullCalendar.js  
+**Backend:** Node.js, Express.js  
+**Database:** SQLite (via better-sqlite3)  
+**Auth:** Supabase (Google OAuth)  
+**ML/AI:** Azure Machine Learning (planned)
 
-## Getting Started ▶️
+---
 
-These instructions will help you get a copy of the project up and running on your local machine for development and testing purposes.
+## Project Structure
 
-1. If you are a part of HCP, request a new repository using this template.
+```
+smartsched/
+  starter-frontend/     # React/Vite frontend
+  starter-backend/      # Express backend
+```
 
-2. Clone your new repository:
+---
+
+## Getting Started
+
+### Prerequisites
+- Node.js
+- npm
+
+### Installation
+
+Clone the repo and install dependencies for both frontend and backend:
 
 ```bash
 git clone <your-repo-url>
-```
+cd smartsched
 
-3. Install the required dependencies for both the frontend and backend:
-
-```bash
-cd <your-repo-name>
 cd starter-frontend
-npm i
+npm install
+
 cd ../starter-backend
-npm i
+npm install
 ```
 
-## Development 💻
+### Environment Variables
 
-To start the development environment, follow these steps:
+Create a `.env` file in `starter-backend/`:
 
-1. Start your server (from the root of the project):
+```
+SUPABASE_URL=your-supabase-project-url
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+> Never commit your `.env` file. It's already in `.gitignore`.
+
+### Running the App
+
+In one terminal, start the backend:
 
 ```bash
 cd starter-backend
-npm start
+node server.js
 ```
 
-2. In a new terminal window (starting from the root of your project):
+In another terminal, start the frontend:
+
 ```bash
 cd starter-frontend
-npm start
+npm run dev
 ```
 
-### Authors 📝
+Frontend runs on `http://localhost:5173`  
+Backend runs on `http://localhost:3001`
 
-[Elijah Melton](https://github.com/elimelt)
+---
 
-### Contributing 🤝
+## API Endpoints
 
-If you have any feedback feel free to submit an issue/pull request! Contributions are more than welcome.
+### Events
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/events` | Get all events |
+| GET | `/api/events/:id` | Get a single event |
+| POST | `/api/events` | Create a new event |
+| DELETE | `/api/events/:id` | Delete an event |
 
+### Assignments
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/assignments` | Get all active assignments |
+| POST | `/api/assignments` | Create a new assignment |
+| PUT | `/api/assignments/:id` | Update an assignment |
+| DELETE | `/api/assignments/:id` | Delete an assignment |
+
+---
+
+## MVP Features
+
+- [x] Calendar UI with week/month/day views
+- [x] Event creation and deletion
+- [x] Assignment management (add, update, complete)
+- [x] SQLite persistent storage
+- [ ] Google login via Supabase
+- [ ] Class schedule import (.ics)
+- [ ] AI-generated optimized schedule
+- [ ] Canvas / Google Calendar sync
+
+---
+
+## Contributing
+
+This project uses a PR-based workflow.
+
+1. Create a new branch for your feature:
+   ```bash
+   git checkout -b your-feature-name
+   ```
+2. Make your changes and commit:
+   ```bash
+   git add .
+   git commit -m "feat: description of your change"
+   ```
+3. Push and open a PR:
+   ```bash
+   git push origin your-feature-name
+   ```
+4. Get at least one review before merging into main.
+
+---
+
+## Team
+
+| Role | Members |
+|------|---------|
+| Frontend | Jessica, Xander, Dana |
+| Backend | Stephanie, Dana, Sid |
+| AI/ML | Sid, Jessica, Dana |
+| Project Lead | Rotating monthly |
+| Guide | Medha |
