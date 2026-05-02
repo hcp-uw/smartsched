@@ -1,6 +1,7 @@
 const express = require("express")
 const cors = require("cors")
 const { unknownEndpoint } = require('./middleware');
+const eventsRouter = require("./routes/events");
 
 // create your express application
 const app = express();
@@ -10,6 +11,8 @@ app.use(express.json());
 
 // enable cors
 app.use(cors());
+
+app.use("/api/events", eventsRouter);
 
 // our 'database'. This is just a simple in-memory store for the images, and
 // will be lost when the server is restarted. In a real application, you would
