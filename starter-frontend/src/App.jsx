@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { Toaster } from "./components/ui/sonner";
 import { AppProvider } from "./context/AppContext";
 import { Calendar } from "./pages/Calendar";
+import { Login } from "./pages/Login";
 import { BrowserRouter } from "react-router-dom";
 import { supabase } from "./supabaseClient";
 
@@ -31,12 +32,7 @@ export default function App() {
 
 
   if (!session) {
-    return (
-      <div style={{ padding: "24px" }}>
-        <h1>SmartSched</h1>
-        <button onClick={loginWithGoogle}>Login with Google</button>
-      </div>
-    );
+    return <Login />;
   }
 
   return (
