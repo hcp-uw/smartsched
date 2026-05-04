@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+//import { useNavigate } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { supabase } from "../supabaseClient";
 
 export function Login() {
-  const navigate = useNavigate();
+  //const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
 
   const handleGoogleLogin = async () => {
