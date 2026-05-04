@@ -3,6 +3,7 @@ import { Home, Calendar, CheckSquare, Sparkles, User, Moon, Sun } from "lucide-r
 import { useTheme } from "next-themes";
 import { motion } from "motion/react";
 
+
 const navItems = [
   { path: "/", label: "Home", icon: Home },
   { path: "/calendar", label: "Calendar", icon: Calendar },
@@ -17,17 +18,27 @@ export function Sidebar() {
 
   return (
     <div className="w-64 bg-card border-r border-border h-screen flex flex-col sticky top-0">
-      {/* Logo */}
+      {/* Top */}
       <div className="p-6 border-b border-border">
-        <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6] flex items-center justify-center shadow-lg">
-            <Sparkles className="w-5 h-5 text-white" />
+        <Link to="/" className="flex items-center gap-3 group">
+          
+          {/* Logo */}
+          <div className="w-16 h-16 flex items-center justify-center overflow-hidden shrink-0">
+            <img
+              src="/logo.png"
+              alt="SmartSched"
+              className="w-60 h-60 object-contain"
+            />
           </div>
+
+          {/* Text */}
           <div>
             <h1 className="text-xl font-semibold bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] bg-clip-text text-transparent">
               SmartSched
             </h1>
-            <p className="text-xs text-muted-foreground">AI-Powered Planning</p>
+            <p className="text-xs text-muted-foreground">
+              AI-Powered Planning
+            </p>
           </div>
         </Link>
       </div>
