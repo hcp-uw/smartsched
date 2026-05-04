@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import './index.css';
+import './styles/index.css';
 
 // The `ReactDOM.createRoot` selects the root DOM node where the React
 // application will be rendered. Then, the `root.render` method is called
