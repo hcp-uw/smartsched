@@ -26,6 +26,7 @@ let events = [
         end: "2026-01-29T11:00:00",
     },
 ];
+});
 
 // GET all events
 router.get("/", authMiddleware, (req, res) => {
@@ -53,9 +54,9 @@ router.post("/", authMiddleware, (req, res) => {
     res.status(201).json({ event: { id: result.lastInsertRowid, title, start, end } });
 });
 
-router.delete("/:id", (req, res) => {
-    const result = db.prepare("DELETE FROM events WHERE id = ?").run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ error: "Event not found" });
+// router.delete("/:id", (req, res) => {
+//     const result = db.prepare("DELETE FROM events WHERE id = ?").run(req.params.id);
+//     if (result.changes === 0) return res.status(404).json({ error: "Event not found" });
 // DELETE event
 router.delete("/:id", authMiddleware, (req, res) => {
     const index = events.findIndex(e => e.id === req.params.id);
