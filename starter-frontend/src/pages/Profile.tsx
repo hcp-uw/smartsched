@@ -7,8 +7,11 @@ import { Slider } from "../components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Switch } from "../components/ui/switch";
 import { motion } from "motion/react";
+import { supabase } from "../supabaseClient";
+import { useNavigate } from "react-router-dom";
 
 const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
 
 interface DayPreferences {
   enabled: boolean;
@@ -37,6 +40,14 @@ export function Profile() {
   const [dayPreferences, setDayPreferences] = useState<Record<string, DayPreferences>>(
     Object.fromEntries(daysOfWeek.map((day) => [day, { ...defaultPreferences }]))
   );
+
+  //logout handling
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate("/login");
+  };
 
   const currentDayPref = dayPreferences[selectedDay];
 
@@ -174,6 +185,14 @@ export function Profile() {
 
                 <Button className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90">
                   Save Changes
+                </Button>
+
+                <Button
+                  onClick={handleLogout}
+                  variant="outline"
+                  className="w-full mt-3"
+                >
+                  Log Out
                 </Button>
               </div>
             </div>
