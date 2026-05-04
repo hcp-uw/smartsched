@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+//import { useNavigate } from "react-router-dom";
 import { Sparkles } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { supabase } from "../supabaseClient";
+import logo from "../assets/logo.png";
 
 export function Login() {
-  const navigate = useNavigate();
+  //const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
 
   const handleGoogleLogin = async () => {
@@ -29,15 +30,21 @@ export function Login() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          {/* LOGO PLACEHOLDER */}
-          {/* Replace below div with: <img src="YOUR_LOGO_PATH" /> */}
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6] shadow-2xl mb-4">
-            <Sparkles className="w-8 h-8 text-white" />
+          <div className="h-48 flex items-center justify-center">
+            <img
+              src={logo}
+              alt="SmartSched Logo"
+              className="w-200 h-200 object-contain"
+            />
           </div>
 
+          {
+          /*
           <h1 className="text-3xl font-semibold bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] bg-clip-text text-transparent mb-2">
             SmartSched
           </h1>
+          */
+          }
 
           <p className="text-muted-foreground">
             AI-Powered Scheduling & Task Management
