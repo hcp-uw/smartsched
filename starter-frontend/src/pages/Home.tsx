@@ -1,17 +1,49 @@
 import { Link } from "react-router-dom";
+import { supabase } from "../supabaseClient";
 import { Calendar, CheckSquare, Clock, Sparkles, TrendingUp, ArrowRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Progress } from "../components/ui/progress";
 import { motion } from "motion/react";
 import { format, isSameDay } from "date-fns";
 import { useApp } from "../context/AppContext";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 
 const hours = Array.from({ length: 24 }, (_, i) => i);
 
 export function Home() {
   const { events, tasks, deadlines } = useApp();
   const todayScrollRef = useRef<HTMLDivElement>(null);
+
+  const [firstName, setFirstName] = useState("User");
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData.user;
+
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", user.id)
+        .single();
+
+      if (profile?.display_name) {
+        const name = profile.display_name.split(" ")[0]; // 👈 first name only
+        setFirstName(name);
+      }
+    };
+
+    loadUser();
+  }, []);
+
+  const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+};
   
   const today = new Date();
   const todayEvents = events.filter((event) => isSameDay(event.start, today));
@@ -53,7 +85,9 @@ export function Home() {
       <div className="max-w-7xl mx-auto p-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-semibold mb-2">Good morning, John</h1>
+          <h1 className="text-3xl font-semibold mb-2">
+            {getGreeting()}, {firstName}
+          </h1>
           <p className="text-muted-foreground">
             {format(today, "EEEE, MMMM d, yyyy")}
           </p>
