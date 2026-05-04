@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "./components/ui/sonner";
@@ -7,7 +6,6 @@ import { Calendar } from "./pages/Calendar";
 import { Login } from "./pages/Login";
 import { BrowserRouter } from "react-router-dom";
 import { supabase } from "./supabaseClient";
-
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -26,11 +24,7 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  const loginWithGoogle = () => {
-    supabase.auth.signInWithOAuth({ provider: "google" });
-  };
-
- return (
+  return (
     <BrowserRouter>
       {!session ? (
         <Login />
@@ -43,6 +37,7 @@ export default function App() {
             >
               Logout
             </button>
+
             <Calendar />
             <Toaster />
           </AppProvider>
@@ -50,6 +45,4 @@ export default function App() {
       )}
     </BrowserRouter>
   );
-
-  
 }
