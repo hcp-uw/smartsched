@@ -30,20 +30,20 @@ export default function App() {
     supabase.auth.signInWithOAuth({ provider: "google" });
   };
 
-
-  if (!session) {
-    return <Login />;
-  }
-
-  return (
+ return (
     <BrowserRouter>
-      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-        <AppProvider>
-          <Calendar />
-          <Toaster />
-        </AppProvider>
-      </ThemeProvider>
+      {!session ? (
+        <Login />
+      ) : (
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+          <AppProvider>
+            <Calendar />
+            <Toaster />
+          </AppProvider>
+        </ThemeProvider>
+      )}
     </BrowserRouter>
   );
+
   
 }
