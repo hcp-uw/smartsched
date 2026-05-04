@@ -34,7 +34,7 @@ export function Login() {
             <img
               src={logo}
               alt="SmartSched Logo"
-              className="w-200 h-200 object-contain"
+              className="w-80 h-80 object-contain -translate-y-10"
             />
           </div>
 
