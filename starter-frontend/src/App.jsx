@@ -37,6 +37,12 @@ export default function App() {
       ) : (
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <AppProvider>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              style={{ position: "absolute", top: 10, right: 10 }}
+            >
+              Logout
+            </button>
             <Calendar />
             <Toaster />
           </AppProvider>
