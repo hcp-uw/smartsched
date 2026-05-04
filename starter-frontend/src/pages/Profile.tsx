@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { User, Mail, Settings, Sun, Moon, Coffee, Utensils, BriefcaseBusiness } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -9,6 +8,8 @@ import { Switch } from "../components/ui/switch";
 import { motion } from "motion/react";
 import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { getOrCreateProfile } from "../lib/profile";
 
 const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -36,11 +37,6 @@ const defaultPreferences: DayPreferences = {
 };
 
 export function Profile() {
-  const [selectedDay, setSelectedDay] = useState("Monday");
-  const [dayPreferences, setDayPreferences] = useState<Record<string, DayPreferences>>(
-    Object.fromEntries(daysOfWeek.map((day) => [day, { ...defaultPreferences }]))
-  );
-
   //logout handling
   const navigate = useNavigate();
 
@@ -48,6 +44,52 @@ export function Profile() {
     await supabase.auth.signOut();
     navigate("/login");
   };
+
+  const [selectedDay, setSelectedDay] = useState("Monday");
+  const [dayPreferences, setDayPreferences] = useState<Record<string, DayPreferences>>(
+    Object.fromEntries(daysOfWeek.map((day) => [day, { ...defaultPreferences }]))
+  );
+
+  //profile states
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  
+  const [form, setForm] = useState({
+    display_name: "",
+    email: "",
+    timezone: "",
+  });
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData.user;
+
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      const profileData = await getOrCreateProfile(user);
+
+      //temp test
+        console.log("PROFILE FROM SUPABASE:", profileData);
+
+        setProfile(profileData);
+
+        setForm({
+          display_name: profileData?.display_name || "",
+          email: user.email || "",
+          timezone: "",
+        });
+
+        setLoading(false);
+    };
+
+    load();
+  }, []);
 
   const currentDayPref = dayPreferences[selectedDay];
 
@@ -149,28 +191,49 @@ export function Profile() {
           >
             <div className="bg-card border border-border rounded-2xl p-6">
               <div className="flex flex-col items-center mb-6">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6] flex items-center justify-center text-white text-3xl font-semibold mb-4 shadow-xl">
-                  JD
+                {/* Profile Picture */}
+                <div className="w-24 h-24 rounded-full mb-4 shadow-xl overflow-hidden bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6] flex items-center justify-center">
+                  {profile?.profile_picture_url ? (
+                    <img
+                      src={profile.profile_picture_url}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-white text-3xl font-semibold">
+                      {profile?.display_name?.slice(0, 2).toUpperCase() || "U"}
+                    </span>
+                  )}
                 </div>
-                <h2 className="text-xl font-semibold">John Doe</h2>
-                <p className="text-sm text-muted-foreground">johndoe@example.com</p>
-              </div>
 
+                {/* Name */}
+                <h2 className="text-xl font-semibold">
+                  {profile?.display_name || "Loading..."}
+                </h2>
+
+                {/* Email */}
+                <p className="text-sm text-muted-foreground">
+                  {profile?.email || "No email found"}
+                </p>
+              </div>
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="name" className="text-sm">Full Name</Label>
                   <Input
                     id="name"
-                    defaultValue="John Doe"
+                    value={form.display_name}
+                    onChange={(e) =>
+                      setForm({ ...form, display_name: e.target.value })
+                    }
                     className="mt-2 bg-input-background"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="email" className="text-sm">Email</Label>
                   <Input
                     id="email"
                     type="email"
-                    defaultValue="johndoe@example.com"
+                    value={form.email}
+                    disabled
                     className="mt-2 bg-input-background"
                   />
                 </div>
@@ -178,12 +241,30 @@ export function Profile() {
                   <Label htmlFor="timezone" className="text-sm">Timezone</Label>
                   <Input
                     id="timezone"
-                    defaultValue="Pacific Time (PT)"
+                    value={form.timezone}
+                    onChange={(e) =>
+                      setForm({ ...form, timezone: e.target.value })
+                    }
                     className="mt-2 bg-input-background"
                   />
                 </div>
 
-                <Button className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90">
+                <Button
+                  className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
+                  onClick={async () => {
+                    if (!profile?.id) return;
+
+                    await supabase
+                      .from("profiles")
+                      .update({
+                        display_name: form.display_name,
+                      })
+                      .eq("id", profile.id);
+
+                    const updated = await getOrCreateProfile(profile);
+                    setProfile(updated);
+                  }}
+                >
                   Save Changes
                 </Button>
 
