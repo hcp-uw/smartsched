@@ -1,10 +1,9 @@
-const unknownEndpoint = (req, res) => {
+import { createClient } from '@supabase/supabase-js'
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY)
+
+export const unknownEndpoint = (req, res) => {
     res.status(404).send({ error: 'unknown endpoint' })
 }
-
-const validateEvent = (req, res, next) => {
-// supabase
-import { supabase } from './lib/supabaseClient.js'
 
 export async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '')
@@ -19,12 +18,6 @@ export async function authMiddleware(req, res, next) {
   next()
 }
 
-// define middleware to handle requests made to unknown endpoint
-export function unknownEndpoint(req, res) {
-    res.status(404).send({ error: 'unknown endpoint' })
-}
-
-//module.exports = { unknownEndpoint }
 
 // event validation
 export function validateEvent(req, res, next){
@@ -37,9 +30,9 @@ export function validateEvent(req, res, next){
     next();
 }
 
-module.exports = { unknownEndpoint, validateEvent }
-
-    next()
-};
+// module.exports = { unknownEndpoint, validateEvent }
+//
+//     next()
+// };
 
 //module.exports = validateEvent;
