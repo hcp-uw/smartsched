@@ -1,7 +1,8 @@
-const express = require("express")
-const cors = require("cors")
-const { unknownEndpoint } = require('./middleware');
-const eventsRouter = require("./routes/events");
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import { unknownEndpoint } from './middleware.js'
+import eventsRouter from './routes/events.js'
 
 // create your express application
 const app = express();
@@ -43,7 +44,7 @@ app.get('/image/featured', (req, res) => {
 app.use(unknownEndpoint);
 
 // set port to listen on
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // start your server
 app.listen(PORT, () => {
