@@ -18,14 +18,14 @@ router.get("/:id", (req, res) => {
 
 router.post("/", (req, res) => {
 // temporary in-memory events list
-let events = [
-    {
-        id: "1",
-        title: "Sample Event",
-        start: "2026-01-29T10:00:00",
-        end: "2026-01-29T11:00:00",
-    },
-];
+    let events = [
+        {
+            id: "1",
+            title: "Sample Event",
+            start: "2026-01-29T10:00:00",
+            end: "2026-01-29T11:00:00",
+        },
+    ];
 });
 
 // GET all events
