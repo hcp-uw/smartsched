@@ -1,51 +1,26 @@
-const express = require("express")
-const cors = require("cors")
-const { unknownEndpoint } = require('./middleware');
-const eventsRouter = require("./routes/events");
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import { unknownEndpoint } from './middleware.js'
+import eventsRouter from './routes/events.js'
+import assignmentsRouter from './routes/assignments.js'
 
-// create your express application
-const app = express();
+const app = express()
 
-// enable json parsing
-app.use(express.json());
+app.use(express.json())
+app.use(cors())
 
-// enable cors
-app.use(cors());
+app.use('/api/events', eventsRouter)
+app.use('/api/assignments', assignmentsRouter)
 
-app.use("/api/events", eventsRouter);
-
-// our 'database'. This is just a simple in-memory store for the images, and
-// will be lost when the server is restarted. In a real application, you would
-// use a database to store the images.
-const images = [];
-
-// test endpoint
 app.get('/message/hello', (req, res) => {
-    res.send(
-        `Attention HCP Project Team! If you see this, your front end and
-        back end are connected. Don't believe me? Upload and image and
-        see for yourself!`
-    )
+    res.send('SmartSched backend is running!')
 })
 
-app.post('/image/upload', (req, res) => {
-    console.log(req.body);
-    const base64ImgData = req.body.image;
-    images.push(base64ImgData);
-    res.status(201).send('Image uploaded');
-})
+app.use(unknownEndpoint)
 
-app.get('/image/featured', (req, res) => {
-    res.send(images);
-})
+const PORT = process.env.PORT || 3001
 
-// error handling
-app.use(unknownEndpoint);
-
-// set port to listen on
-const PORT = 3001;
-
-// start your server
 app.listen(PORT, () => {
-    console.log(`Server running on port test ${PORT}`);
-});
+    console.log(`Server running on port ${PORT}`)
+})
