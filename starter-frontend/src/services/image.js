@@ -1,5 +1,5 @@
 import axios from 'axios'
-const baseUrl = 'http://localhost:3001/image'
+const baseUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/image`
 
 // Upload and get images from server. Everything is transferred as base64 strings.
 
