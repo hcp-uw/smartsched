@@ -3,7 +3,7 @@ import axios from 'axios'
 // This file is a "service" that wraps calls to our API. Think of it
 // as a library that provides functions to interact with our server.
 
-const baseURL = 'http://localhost:3001/message'
+const baseURL = `${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/message`
 
 // The `getMessage` function sends an HTTP GET request to the server
 // to retrieve a message. It returns a promise that resolves to the
