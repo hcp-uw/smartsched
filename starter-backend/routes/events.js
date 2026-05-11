@@ -3,7 +3,7 @@ import { authMiddleware } from "../middleware.js"
 
 //const express = require("express");
 const router = express.Router();
-const db = require("../db");
+import db from "../db.js";
 
 router.get("/", (req, res) => {
     const events = db.prepare("SELECT * FROM events").all();
@@ -18,14 +18,14 @@ router.get("/:id", (req, res) => {
 
 router.post("/", (req, res) => {
 // temporary in-memory events list
-let events = [
-    {
-        id: "1",
-        title: "Sample Event",
-        start: "2026-01-29T10:00:00",
-        end: "2026-01-29T11:00:00",
-    },
-];
+    let events = [
+        {
+            id: "1",
+            title: "Sample Event",
+            start: "2026-01-29T10:00:00",
+            end: "2026-01-29T11:00:00",
+        },
+    ];
 });
 
 // GET all events
