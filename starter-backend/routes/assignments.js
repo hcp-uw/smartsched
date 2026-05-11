@@ -1,43 +1,44 @@
-// routes/assignments.js
-const express = require("express");
-const router = express.Router();
-const db = require("../db");
+import express from 'express'
+
+const router = express.Router()
+
+// In-memory store until database is sorted
+let assignments = []
 
 router.get("/", (req, res) => {
-    const assignments = db.prepare("SELECT * FROM assignments WHERE status != 'completed'").all();
-    res.json({ assignments });
-});
+    const active = assignments.filter(a => a.status !== 'completed')
+    res.json({ assignments: active })
+})
 
 router.post("/", (req, res) => {
-    const { title, due_date, time_estimate_minutes, priority } = req.body;
+    const { title, due_date, time_estimate_minutes, priority } = req.body
     if (!title || !due_date) {
-        return res.status(400).json({ error: "title and due_date are required" });
+        return res.status(400).json({ error: "title and due_date are required" })
     }
-    const result = db.prepare(
-        "INSERT INTO assignments (title, due_date, time_estimate_minutes, priority) VALUES (?, ?, ?, ?)"
-    ).run(title, due_date, time_estimate_minutes ?? null, priority ?? 1);
-    res.status(201).json({ assignment: { id: result.lastInsertRowid, title, due_date, time_estimate_minutes, priority, status: 'pending' } });
-});
+    const assignment = {
+        id: String(Date.now()),
+        title,
+        due_date,
+        time_estimate_minutes: time_estimate_minutes ?? null,
+        priority: priority ?? 1,
+        status: 'pending'
+    }
+    assignments.push(assignment)
+    res.status(201).json({ assignment })
+})
 
 router.put("/:id", (req, res) => {
-    const { title, due_date, time_estimate_minutes, priority, status } = req.body;
-    const result = db.prepare(`
-        UPDATE assignments SET
-            title = COALESCE(?, title),
-            due_date = COALESCE(?, due_date),
-            time_estimate_minutes = COALESCE(?, time_estimate_minutes),
-            priority = COALESCE(?, priority),
-            status = COALESCE(?, status)
-        WHERE id = ?
-    `).run(title, due_date, time_estimate_minutes, priority, status, req.params.id);
-    if (result.changes === 0) return res.status(404).json({ error: "Assignment not found" });
-    res.json({ message: "Updated" });
-});
+    const index = assignments.findIndex(a => a.id === req.params.id)
+    if (index === -1) return res.status(404).json({ error: "Assignment not found" })
+    assignments[index] = { ...assignments[index], ...req.body }
+    res.json({ message: "Updated" })
+})
 
 router.delete("/:id", (req, res) => {
-    const result = db.prepare("DELETE FROM assignments WHERE id = ?").run(req.params.id);
-    if (result.changes === 0) return res.status(404).json({ error: "Assignment not found" });
-    res.status(204).send();
-});
+    const index = assignments.findIndex(a => a.id === req.params.id)
+    if (index === -1) return res.status(404).json({ error: "Assignment not found" })
+    assignments.splice(index, 1)
+    res.status(204).send()
+})
 
-module.exports = router;
+export default router
