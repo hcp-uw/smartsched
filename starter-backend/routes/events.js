@@ -3,7 +3,7 @@ import { authMiddleware } from "../middleware.js"
 
 //const express = require("express");
 const router = express.Router();
-const db = require("../db");
+import db from "../db.js";
 
 router.get("/", (req, res) => {
     const events = db.prepare("SELECT * FROM events").all();
