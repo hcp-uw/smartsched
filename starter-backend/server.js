@@ -1,7 +1,9 @@
-const express = require("express")
-const cors = require("cors")
-const { unknownEndpoint } = require('./middleware');
-const eventsRouter = require("./routes/events");
+import 'dotenv/config'
+import express from 'express'
+import cors from 'cors'
+import { unknownEndpoint } from './middleware.js'
+import eventsRouter from './routes/events.js'
+import aiRouter from './routes/ai.js'
 
 // create your express application
 const app = express();
@@ -10,9 +12,14 @@ const app = express();
 app.use(express.json());
 
 // enable cors
-app.use(cors());
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 app.use("/api/events", eventsRouter);
+app.use("/api/ai", aiRouter);
 
 // our 'database'. This is just a simple in-memory store for the images, and
 // will be lost when the server is restarted. In a real application, you would
@@ -43,9 +50,15 @@ app.get('/image/featured', (req, res) => {
 app.use(unknownEndpoint);
 
 // set port to listen on
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // start your server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`Server running on port test ${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+    server.close(() => {
+        console.log('Server closed');
+    });
 });
