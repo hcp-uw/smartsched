@@ -21,41 +21,62 @@ const safetySettings = [
     }
 ]
 
-export async function generateResponse(prompt) {
-    const systemInstructions = "You are a scheduling and producitvity assistant to the user. Based on the user's prompt, " +
-        "make help them optimize a schedule based on their free time and tasks, " +
-        "and limit it to 50 words."
-    // In addition, you must crucially generate clear system flags for choices in the story" +
-        //"and eventually the ending. These flags must adhere to the given JSON schema."
+export async function generateResponse(prompt, context = {}) {
+    const history = (context.history || []).map(msg => ({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+    }));
+
+    const systemInstructions = `You are a scheduling and productivity assistant. 
+    The user's current schedule is provided in the context:
+    Tasks: ${JSON.stringify(context.tasks || [])}
+    Events: ${JSON.stringify(context.events || [])}
+
+    Your goal is to help the user manage and optimize their schedule. 
+    IMPORTANT: Only suggest "actions" (modifications) if:
+    a) The user explicitly asks for suggestions or optimization.
+    b) The user describes a specific change they want to make (e.g., "Move my meeting", "Mark task as done").
+    
+    If the user is just chatting or asking general questions, respond naturally without including any JSON actions.
+
+    An action can be:
+    1. "add_event": Create a new calendar event.
+    2. "update_event": Modify an existing event.
+    3. "delete_event": Remove an event.
+    4. "update_task": Modify a task (e.g., mark as completed).
+
+    Respond in a mix of natural language and structured JSON.
+    The JSON part must be an array of actions, each with a type and payload.
+    Example JSON in response:
+    [
+      { "type": "add_event", "payload": { "title": "Focus Session", "start": "2026-05-11T14:00:00", "end": "2026-05-11T15:00:00" }, "description": "Add a focus session at 2 PM" },
+      { "type": "update_task", "payload": { "id": "t1", "updates": { "completed": true } }, "description": "Mark 'Finish report' as completed" }
+    ]
+
+    Always keep your natural language response helpful and concise (under 100 words).
+    If you suggest actions, include them at the end of your response inside a code block tagged with 'json-actions'.
+    `;
+
     try {
         const model = genAI.getGenerativeModel({
             model: "gemini-3.1-flash-lite",
             generationConfig: {
                 temperature: 0.7,
-                /*
-                responseMime: "@/responseTypes.json",
-                responseSchema: "@/responseTypes.json",
-                 */
             },
             safetySettings: safetySettings,
             systemInstruction: systemInstructions,
         });
-        const result = await model.generateContent(prompt);
-        const text = (await result.response)
-        console.log(text.text());
-        if (text.candidates && text.candidates.length > 0) {
-            const finishReason = text.candidates[0].finishReason;
-            console.log("Finish Reason:", finishReason);
 
-            if (finishReason === "MAX_TOKENS") {
-                console.error("Response stopped due to maxOutputTokens being too low.");
-            } else if (finishReason === "SAFETY") {
-                console.error("Response was blocked by safety settings.");
-            }
-        }
-        return text.text();
+        const chatSession = model.startChat({
+            history: history,
+        });
+
+        const result = await chatSession.sendMessage(prompt);
+        const responseText = result.response.text();
+        console.log(responseText);
+        return responseText;
     } catch (error) {
-        console.error("Error generating story:", error);
-        throw new Error("Failed to generate story");
+        console.error("Error generating AI response:", error);
+        throw new Error("Failed to generate AI response");
     }
 }
