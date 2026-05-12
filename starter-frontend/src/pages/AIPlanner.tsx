@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Sparkles, Wand2, Calendar, CheckSquare, Zap, RefreshCw, Filter, X, MessageSquare, Send, Bot, User as UserIcon, Loader2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Sparkles, Wand2, Calendar, CheckSquare, Zap, RefreshCw, Filter, X, MessageSquare, Send, Bot, User as UserIcon, Loader2, Check, Trash2, Edit3, Plus } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
@@ -24,6 +24,10 @@ export function AIPlanner() {
     aiGeneratedEvents,
     setAIGeneratedEvents,
     acceptAISchedule,
+    addEvent,
+    updateEvent,
+    deleteEvent,
+    updateTask,
   } = useApp();
 
   // ============================================================================
@@ -38,9 +42,16 @@ export function AIPlanner() {
   const [includeCompleted, setIncludeCompleted] = useState(false);
 
   // Chat states
-  const [messages, setMessages] = useState<{role: 'user' | 'assistant', content: string}[]>([]);
+  const [messages, setMessages] = useState<{role: 'user' | 'assistant', content: string, actions?: any[]}[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isTyping]);
 
   // ============================================================================
   // COMPUTED VALUES
@@ -129,13 +140,87 @@ export function AIPlanner() {
     setIsTyping(true);
 
     try {
-      const data = await chat(userMessage);
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+      const context = {
+        tasks: tasks.map(t => ({ id: t.id, title: t.title, completed: t.completed, priority: t.priority, duration: t.duration, dueDate: t.dueDate })),
+        events: events.map(e => ({ id: e.id, title: e.title, start: e.start, end: e.end })),
+        history: messages.slice(-10).map(m => ({ role: m.role, content: m.content.replace(/```json-actions[\s\S]*?```/g, "").trim() }))
+      };
+      
+      const data = await chat(userMessage, context);
+      
+      // Parse for actions
+      let content = data.response;
+      let actions = undefined;
+      
+      const jsonMatch = content.match(/```json-actions\n([\s\S]*?)\n```/) || content.match(/```json\n([\s\S]*?)\n```/);
+      if (jsonMatch) {
+        try {
+          actions = JSON.parse(jsonMatch[1]);
+          // Clean content from json block for cleaner display if desired, 
+          // or just leave it. The prompt asked to include them.
+        } catch (e) {
+          console.error("Failed to parse AI actions", e);
+        }
+      }
+      
+      setMessages(prev => [...prev, { role: 'assistant', content, actions }]);
     } catch (error) {
       console.error("Chat error:", error);
       toast.error("Failed to get AI response. Please try again.");
     } finally {
       setIsTyping(false);
+    }
+  };
+
+  const clearChat = () => {
+    setMessages([]);
+    toast.success("Conversation context cleared.");
+  };
+
+  const handleApproveAction = (action: any, messageIdx: number, actionIdx: number) => {
+    try {
+      switch (action.type) {
+        case 'add_event':
+          addEvent({
+            id: `ai-event-${Date.now()}`,
+            ...action.payload,
+            start: new Date(action.payload.start),
+            end: new Date(action.payload.end),
+            calendarId: calendars[0]?.id
+          });
+          break;
+        case 'update_event':
+          updateEvent(action.payload.id, {
+            ...action.payload.updates,
+            ...(action.payload.updates.start && { start: new Date(action.payload.updates.start) }),
+            ...(action.payload.updates.end && { end: new Date(action.payload.updates.end) }),
+          });
+          break;
+        case 'delete_event':
+          deleteEvent(action.payload.id);
+          break;
+        case 'update_task':
+          updateTask(action.payload.id, action.payload.updates);
+          break;
+        default:
+          console.warn("Unknown action type", action.type);
+      }
+      
+      // Mark as approved in local state to disable button
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const msg = { ...newMessages[messageIdx] };
+        const newActions = [...(msg.actions || [])];
+        newActions[actionIdx] = { ...newActions[actionIdx], approved: true };
+        msg.actions = newActions;
+        newMessages[messageIdx] = msg;
+        return newMessages;
+      });
+      
+      toast.success(`Action approved: ${action.description || action.type}`);
+    } catch (e) {
+      console.error("Failed to apply action", e);
+      toast.error("Failed to apply action.");
     }
   };
 
@@ -544,19 +629,33 @@ export function AIPlanner() {
           <TabsContent value="chat" className="mt-0">
             <div className="bg-card border border-border rounded-2xl flex flex-col h-[600px] overflow-hidden">
               {/* Chat Header */}
-              <div className="p-4 border-b border-border bg-accent/30 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6] flex items-center justify-center">
-                  <Bot className="w-5 h-5 text-white" />
+              <div className="p-4 border-b border-border bg-accent/30 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6] flex items-center justify-center">
+                    <Bot className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold">Smart Assistant</h2>
+                    <p className="text-xs text-muted-foreground">Always active to help you plan</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="font-semibold">Smart Assistant</h2>
-                  <p className="text-xs text-muted-foreground">Always active to help you plan</p>
-                </div>
+
+                {messages.length > 0 && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={clearChat}
+                    className="text-muted-foreground hover:text-destructive gap-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Clear Chat
+                  </Button>
+                )}
               </div>
 
               {/* Messages Area */}
               <ScrollArea className="flex-1 p-6">
-                <div className="space-y-4">
+                <div className="space-y-4 pr-4" ref={scrollRef}>
                   {messages.length === 0 && (
                     <div className="text-center py-12">
                       <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center mx-auto mb-4">
@@ -575,20 +674,87 @@ export function AIPlanner() {
                         key={idx}
                         initial={{ opacity: 0, y: 10, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+                        className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
                       >
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                          msg.role === 'user' ? 'bg-primary' : 'bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6]'
-                        }`}>
-                          {msg.role === 'user' ? <UserIcon className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
+                        <div className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                            msg.role === 'user' ? 'bg-primary' : 'bg-gradient-to-br from-[#5B8DEF] to-[#8B5CF6]'
+                          }`}>
+                            {msg.role === 'user' ? <UserIcon className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
+                          </div>
+                          <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
+                            msg.role === 'user' 
+                              ? 'bg-primary text-primary-foreground rounded-tr-none' 
+                              : 'bg-accent text-accent-foreground rounded-tl-none shadow-sm border border-border/50'
+                          }`}>
+                            {msg.content.replace(/```json-actions\n[\s\S]*?\n```/g, '').trim()}
+                          </div>
                         </div>
-                        <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
-                          msg.role === 'user' 
-                            ? 'bg-primary text-primary-foreground rounded-tr-none' 
-                            : 'bg-accent text-accent-foreground rounded-tl-none'
-                        }`}>
-                          {msg.content}
-                        </div>
+
+                        {/* Suggested Actions */}
+                        {msg.actions && msg.actions.length > 0 && (
+                          <div className="ml-11 mt-1 space-y-3 w-[85%]">
+                            <p className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground mb-1">Proposed Changes</p>
+                            {msg.actions.map((action, actionIdx) => (
+                              <motion.div 
+                                key={actionIdx}
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: actionIdx * 0.1 }}
+                                className="bg-card border border-border/50 rounded-xl p-3 shadow-sm hover:border-primary/50 transition-colors"
+                              >
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex items-start gap-3">
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                                      action.type === 'add_event' ? 'bg-green-100 text-green-600 dark:bg-green-950/30' :
+                                      action.type === 'update_event' ? 'bg-blue-100 text-blue-600 dark:bg-blue-950/30' :
+                                      action.type === 'delete_event' ? 'bg-red-100 text-red-600 dark:bg-red-950/30' :
+                                      'bg-purple-100 text-purple-600 dark:bg-purple-950/30'
+                                    }`}>
+                                      {action.type === 'add_event' && <Plus className="w-4 h-4" />}
+                                      {action.type === 'update_event' && <Edit3 className="w-4 h-4" />}
+                                      {action.type === 'delete_event' && <Trash2 className="w-4 h-4" />}
+                                      {action.type === 'update_task' && <CheckSquare className="w-4 h-4" />}
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-medium leading-tight mb-1">{action.description || action.type}</p>
+                                      {action.type === 'add_event' && (
+                                        <p className="text-xs text-muted-foreground">
+                                          {format(new Date(action.payload.start), 'MMM d, h:mm a')} - {format(new Date(action.payload.end), 'h:mm a')}
+                                        </p>
+                                      )}
+                                      {action.type === 'update_event' && action.payload.updates.start && (
+                                        <p className="text-xs text-muted-foreground">
+                                          New time: {format(new Date(action.payload.updates.start), 'h:mm a')}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant={action.approved ? "ghost" : "outline"}
+                                    disabled={action.approved}
+                                    onClick={() => handleApproveAction(action, idx, actionIdx)}
+                                    className={`h-8 px-3 gap-1.5 transition-all ${
+                                      action.approved 
+                                        ? "text-green-600 bg-green-50 dark:bg-green-950/20" 
+                                        : "hover:bg-primary hover:text-white"
+                                    }`}
+                                  >
+                                    {action.approved ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5" />
+                                        Approved
+                                      </>
+                                    ) : (
+                                      <>Approve</>
+                                    )}
+                                  </Button>
+                                </div>
+                              </motion.div>
+                            ))}
+                          </div>
+                        )}
                       </motion.div>
                     ))}
                   </AnimatePresence>
