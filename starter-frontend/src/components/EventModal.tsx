@@ -76,7 +76,7 @@ export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate
     const endDateTime = new Date(`${endDate}T${endTime}`);
 
     const newEvent: CalendarEvent = {
-      id: event?.id || `evt-${Date.now()}`,
+      id: event?.id || crypto.randomUUID(),
       title,
       start: startDateTime,
       end: endDateTime,

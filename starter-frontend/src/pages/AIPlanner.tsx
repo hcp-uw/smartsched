@@ -182,7 +182,7 @@ export function AIPlanner() {
       switch (action.type) {
         case 'add_event':
           addEvent({
-            id: `ai-event-${Date.now()}`,
+            id: crypto.randomUUID(),
             ...action.payload,
             start: new Date(action.payload.start),
             end: new Date(action.payload.end),
