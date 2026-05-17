@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Logs
 logs
 *.log
@@ -133,3 +134,6 @@ dist
 
 #environment variables
 starter-frontend/.env
+=======
+.env
+>>>>>>> 2f6d85885cbcf0cd9d2f067354d1e5229ca75e71
