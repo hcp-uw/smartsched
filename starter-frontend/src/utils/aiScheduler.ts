@@ -25,6 +25,9 @@ export interface AIScheduleRequest {
     workHoursEnd?: number; // e.g., 17 for 5 PM
     breakDuration?: number; // in minutes
     maxTasksPerDay?: number;
+    workDays?: number[]; // [1, 2, 3, 4, 5] for Mon-Fri
+    busySlots?: { start: Date; end: Date }[];
+    freeSlots?: { start: Date; end: Date }[];
   };
 }
 
@@ -32,6 +35,12 @@ export interface TimeSlot {
   start: Date;
   end: Date;
   duration: number; // in minutes
+}
+
+function applyDecimalHour(date: Date, hour: number) {
+  const wholeHours = Math.floor(hour);
+  const minutes = Math.round((hour - wholeHours) * 60);
+  date.setHours(wholeHours, minutes, 0, 0);
 }
 
 /**
@@ -44,10 +53,13 @@ export function generateAISchedule(request: AIScheduleRequest): CalendarEvent[] 
   const workStart = preferences.workHoursStart ?? 9;
   const workEnd = preferences.workHoursEnd ?? 17;
   const maxTasksPerDay = preferences.maxTasksPerDay ?? 5;
+  const workDays = preferences.workDays;
+  const busySlots = preferences.busySlots || [];
+  const freeSlots = preferences.freeSlots || [];
 
   // Get unscheduled tasks (incomplete, with duration)
   const unscheduledTasks = tasks.filter(
-    (task) => !task.completed && task.duration > 0
+    (task) => !task.completed && (task.duration > 0 || task.priority === 'high')
   );
 
   // Sort tasks by priority and due date
@@ -58,7 +70,10 @@ export function generateAISchedule(request: AIScheduleRequest): CalendarEvent[] 
     existingEvents,
     workStart,
     workEnd,
-    7 // Look ahead 7 days
+    7, // Look ahead 7 days
+    workDays,
+    busySlots,
+    freeSlots
   );
 
   // Schedule tasks into available slots
@@ -100,65 +115,100 @@ function findAvailableTimeSlots(
   existingEvents: CalendarEvent[],
   workStart: number,
   workEnd: number,
-  daysAhead: number
+  daysAhead: number,
+  workDays?: number[],
+  busySlots: { start: Date; end: Date }[] = [],
+  freeSlots: { start: Date; end: Date }[] = []
 ): TimeSlot[] {
   const slots: TimeSlot[] = [];
   const today = startOfDay(new Date());
 
   for (let dayOffset = 0; dayOffset < daysAhead; dayOffset++) {
     const currentDay = addDays(today, dayOffset);
+    const dayOfWeek = currentDay.getDay();
+
+    // Check if it's a work day (if workDays provided)
+    if (workDays && workDays.length > 0 && !workDays.includes(dayOfWeek)) {
+      continue;
+    }
     
     // Create work day boundaries
     const dayStart = new Date(currentDay);
-    dayStart.setHours(workStart, 0, 0, 0);
+    applyDecimalHour(dayStart, workStart);
     
     const dayEnd = new Date(currentDay);
-    dayEnd.setHours(workEnd, 0, 0, 0);
+    applyDecimalHour(dayEnd, workEnd);
 
-    // Get events for this day
-    const dayEvents = existingEvents.filter((event) =>
-      isWithinInterval(event.start, { start: dayStart, end: dayEnd })
+    // Combine existing events with custom busy slots
+    const allBusySlots = [
+      ...existingEvents.map(e => ({ start: e.start, end: e.end })),
+      ...busySlots
+    ];
+
+    // Get busy slots for this day
+    const dayBusySlots = allBusySlots.filter((slot) =>
+      isWithinInterval(slot.start, { start: dayStart, end: dayEnd }) ||
+      isWithinInterval(slot.end, { start: dayStart, end: dayEnd }) ||
+      (slot.start <= dayStart && slot.end >= dayEnd)
     );
 
-    // Sort events by start time
-    const sortedEvents = dayEvents.sort(
+    // Sort busy slots by start time
+    const sortedBusy = dayBusySlots.sort(
       (a, b) => a.start.getTime() - b.start.getTime()
     );
 
-    // Find gaps between events
+    // Find gaps between busy slots
     let currentTime = dayStart;
 
-    for (const event of sortedEvents) {
-      // Check if there's a gap before this event
-      const gapDuration =
-        (event.start.getTime() - currentTime.getTime()) / (1000 * 60);
+    for (const busy of sortedBusy) {
+      // Check if there's a gap before this busy slot
+      if (busy.start > currentTime) {
+        const gapDuration =
+          (busy.start.getTime() - currentTime.getTime()) / (1000 * 60);
 
-      if (gapDuration >= 30) {
-        // At least 30 minutes free
-        slots.push({
-          start: new Date(currentTime),
-          end: new Date(event.start),
-          duration: gapDuration,
-        });
+        if (gapDuration >= 15) {
+          slots.push({
+            start: new Date(currentTime),
+            end: new Date(busy.start),
+            duration: gapDuration,
+          });
+        }
       }
 
-      // Move current time to after this event
-      currentTime = event.end > currentTime ? event.end : currentTime;
+      // Move current time to after this busy slot
+      currentTime = busy.end > currentTime ? busy.end : currentTime;
     }
 
     // Check for gap at end of day
-    const endGapDuration =
-      (dayEnd.getTime() - currentTime.getTime()) / (1000 * 60);
-    if (endGapDuration >= 30) {
+    if (dayEnd > currentTime) {
+      const endGapDuration =
+        (dayEnd.getTime() - currentTime.getTime()) / (1000 * 60);
+      if (endGapDuration >= 15) {
+        slots.push({
+          start: new Date(currentTime),
+          end: new Date(dayEnd),
+          duration: endGapDuration,
+        });
+      }
+    }
+  }
+
+  // Also add free slots if they are not already covered
+  for (const free of freeSlots) {
+    const duration = (free.end.getTime() - free.start.getTime()) / (1000 * 60);
+    // Only add if not overlapping with existing slots (simplified)
+    if (!slots.some(s => 
+      (free.start >= s.start && free.end <= s.end)
+    )) {
       slots.push({
-        start: new Date(currentTime),
-        end: new Date(dayEnd),
-        duration: endGapDuration,
+        start: free.start,
+        end: free.end,
+        duration: duration
       });
     }
   }
 
-  return slots;
+  return slots.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
 /**
@@ -178,21 +228,25 @@ function scheduleTasksIntoSlots(
     const suitableSlot = slots.find((slot) => {
       const slotDay = slot.start.toDateString();
       const tasksOnDay = tasksPerDay.get(slotDay) ?? 0;
+      const taskDuration = task.duration > 0 ? task.duration : 30;
       
       return (
-        slot.duration >= task.duration &&
+        slot.duration >= taskDuration &&
         tasksOnDay < maxTasksPerDay &&
         !isSlotUsed(slot, scheduledEvents)
       );
     });
 
     if (suitableSlot) {
+      // If task has no duration, assume 30 mins
+      const taskDuration = task.duration > 0 ? task.duration : 30;
+      
       // Create event from task
       const event: CalendarEvent = {
         id: `ai-${task.id}-${Date.now()}`,
         title: task.title,
         start: new Date(suitableSlot.start),
-        end: addMinutes(suitableSlot.start, task.duration),
+        end: addMinutes(suitableSlot.start, taskDuration),
         category: task.category,
         color: getCategoryColor(task.category),
         isAIGenerated: true,

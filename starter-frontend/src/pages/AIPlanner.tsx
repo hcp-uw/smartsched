@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, Wand2, Calendar, CheckSquare, Zap, RefreshCw, Filter, X, MessageSquare, Send, Bot, User as UserIcon, Loader2, Check, Trash2, Edit3, Plus } from "lucide-react";
+import { Sparkles, Wand2, Calendar, CheckSquare, Zap, RefreshCw, MessageSquare, Send, Bot, User as UserIcon, Loader2, Check, Trash2, Edit3, Plus } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
@@ -7,11 +7,12 @@ import { Input } from "../components/ui/input";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { motion, AnimatePresence } from "motion/react";
-import { format } from "date-fns";
+import { startOfDay, addDays, startOfWeek, format } from "date-fns";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { generateAISchedule, filterTasksForScheduling } from "../utils/aiScheduler";
 import { chat } from "../services/ai";
+import { VisualWeekScheduler, VisualBlock } from "../components/VisualWeekScheduler";
 
 export function AIPlanner() {
   // ============================================================================
@@ -35,6 +36,9 @@ export function AIPlanner() {
   // ============================================================================
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [activeTab, setActiveTab] = useState("optimizer");
+  
+  const [visualBlocks, setVisualBlocks] = useState<VisualBlock[]>([]);
   
   // Filter states
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -89,7 +93,7 @@ export function AIPlanner() {
   // ============================================================================
   // AI SCHEDULING LOGIC
   // ============================================================================
-  const handleGenerateSchedule = () => {
+  const handleGenerateSchedule = async () => {
     if (filteredTasks.length === 0) {
       toast.error("No tasks match your filters. Adjust filters to include more tasks.");
       return;
@@ -97,26 +101,104 @@ export function AIPlanner() {
 
     setIsGenerating(true);
     
-    // Simulate AI processing delay
-    setTimeout(() => {
-      // Use AI scheduler utility to generate schedule
+    try {
+      // 1. Prepare data for the program (local utility)
+      // Extract preferences from visual blocks
+      const workBlocks = visualBlocks.filter(b => b.type === 'work');
+      const freeBlocks = visualBlocks.filter(b => b.type === 'free');
+      const busyBlocks = visualBlocks.filter(b => b.type === 'busy');
+
+      const applyBlockTime = (date: Date, hour: number) => {
+        const wholeHours = Math.floor(hour);
+        const minutes = Math.round((hour - wholeHours) * 60);
+        date.setHours(wholeHours, minutes, 0, 0);
+      };
+
+      // Helper to convert visual block to Date slots for current week
+      const blockToSlots = (blocks: VisualBlock[]) => {
+        const today = startOfDay(new Date());
+        const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
+
+        return blocks.map(b => {
+          // b.day is 0-6 (Sun-Sat)
+          // Adjust for Monday start if necessary, but startOfWeek(..., {weekStartsOn: 1}) gives Monday.
+          // If b.day is 1 (Mon), it should be weekStart + 0 days.
+          // If b.day is 0 (Sun), it should be weekStart + 6 days.
+          let dayOffset = b.day === 0 ? 6 : b.day - 1;
+          const blockDate = addDays(weekStart, dayOffset);
+          
+          const start = new Date(blockDate);
+          applyBlockTime(start, b.startHour);
+          
+          const end = new Date(blockDate);
+          applyBlockTime(end, b.endHour);
+          
+          return { start, end };
+        });
+      };
+
+      // For programmatic scheduler, we still need workDays and workHours
+      // We can derive them from work blocks or adapt the scheduler
+      const workDays = Array.from(new Set(workBlocks.map(b => b.day)));
+      
+      const preferences = {
+        // Fallback work hours if no work blocks defined
+        workHoursStart: workBlocks.length > 0 ? Math.min(...workBlocks.map(b => b.startHour)) : 9,
+        workHoursEnd: workBlocks.length > 0 ? Math.max(...workBlocks.map(b => b.endHour)) : 17,
+        workDays: workDays.length > 0 ? workDays : [1, 2, 3, 4, 5],
+        busySlots: blockToSlots(busyBlocks),
+        freeSlots: blockToSlots(freeBlocks),
+        maxTasksPerDay: 5,
+      };
+
+      // 2. Initial programmatic generation
       const aiSchedule = generateAISchedule({
         tasks: filteredTasks,
         existingEvents: events,
         calendars,
-        preferences: {
-          workHoursStart: 9,
-          workHoursEnd: 17,
-          maxTasksPerDay: 5,
-        },
+        preferences,
       });
+
+      // 3. Optional: LLM Overhaul/Analysis
+      // We can ask the LLM to review the generated schedule
+      const llmPrompt = `I have generated an initial schedule for the user based on these tasks:
+      ${JSON.stringify(filteredTasks.map(t => ({ title: t.title, priority: t.priority, duration: t.duration })))}
+      
+      And these constraints (Visual Blocks):
+      Work Blocks: ${JSON.stringify(workBlocks.map(b => ({ day: b.day, start: b.startHour, end: b.endHour })))}
+      Free Blocks: ${JSON.stringify(freeBlocks.map(b => ({ day: b.day, start: b.startHour, end: b.endHour })))}
+      Busy Blocks: ${JSON.stringify(busyBlocks.map(b => ({ day: b.day, start: b.startHour, end: b.endHour })))}
+      
+      Initial generated events:
+      ${JSON.stringify(aiSchedule.map(e => ({ title: e.title, start: e.start, end: e.end })))}
+      
+      Does this schedule look optimal? If you have suggestions for improvement, please let me know.
+      Respond with "The schedule looks good" or provide suggestions. 
+      Limit your response to 50 words.`;
+
+      const llmResponse = await chat(llmPrompt, { history: [] });
 
       // Update state through context
       setAIGeneratedEvents(aiSchedule);
       setIsGenerating(false);
       setHasGenerated(true);
       toast.success("AI schedule generated successfully!");
-    }, 2000);
+
+      // 4. Redirect to AI Chat for tweaks
+      setActiveTab("chat");
+      setMessages(prev => [
+        ...prev, 
+        { 
+          role: 'assistant', 
+          content: `I've generated an optimized schedule based on your work hours and preferences! \n\n**Expert Analysis:** ${llmResponse.response}\n\nYou can see the preview in the Optimizer tab. Would you like to tweak anything here?` 
+        }
+      ]);
+
+    } catch (error) {
+      console.error("Optimization error:", error);
+      toast.error("Failed to generate optimized schedule.");
+      setIsGenerating(false);
+    }
   };
 
   const handleAcceptSchedule = () => {
@@ -227,7 +309,7 @@ export function AIPlanner() {
   return (
     <div className="h-screen overflow-y-auto">
       <div className="max-w-7xl mx-auto p-8">
-        <Tabs defaultValue="optimizer" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           {/* Header */}
           <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div className="flex items-center gap-3">
@@ -255,261 +337,171 @@ export function AIPlanner() {
           </div>
 
           <TabsContent value="optimizer" className="mt-0">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Left: Filter Controls */}
-              <div className="lg:col-span-1">
-                <div className="bg-card border border-border rounded-2xl p-6 sticky top-8">
-                  <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-xl font-semibold flex items-center gap-2">
-                      <Filter className="w-5 h-5" />
-                      Filters
-                    </h2>
+            {!hasGenerated ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50/80 p-4 dark:border-blue-800 dark:bg-blue-950/30"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-blue-600 dark:bg-blue-500 flex items-center justify-center shrink-0">
+                      <Calendar className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold leading-tight">Smart Scheduling</h3>
+                      <p className="text-sm text-muted-foreground">Finds space in your week</p>
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="flex items-center gap-3 rounded-xl border border-purple-200 bg-purple-50/80 p-4 dark:border-purple-800 dark:bg-purple-950/30"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-purple-600 dark:bg-purple-500 flex items-center justify-center shrink-0">
+                      <Zap className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold leading-tight">Priority Aware</h3>
+                      <p className="text-sm text-muted-foreground">Weights important work first</p>
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50/80 p-4 dark:border-green-800 dark:bg-green-950/30"
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-green-600 dark:bg-green-500 flex items-center justify-center shrink-0">
+                      <CheckSquare className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold leading-tight">Preference Based</h3>
+                      <p className="text-sm text-muted-foreground">Uses your weekly blocks</p>
+                    </div>
+                  </motion.div>
+                </div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="bg-card border border-border rounded-2xl p-6"
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
+                    <div>
+                      <h2 className="text-2xl font-semibold">Week View</h2>
+                      <p className="text-sm text-muted-foreground">
+                        Draw work, free, and busy blocks, then generate a plan from the matching task set.
+                      </p>
+                    </div>
                     <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={resetFilters}
-                      className="text-muted-foreground hover:text-foreground"
+                      onClick={handleGenerateSchedule}
+                      disabled={isGenerating || filteredTasks.length === 0}
+                      className="h-12 gap-2 bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
                     >
-                      Reset
+                      {isGenerating ? (
+                        <>
+                          <RefreshCw className="w-5 h-5 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Wand2 className="w-5 h-5" />
+                          Generate AI Schedule
+                        </>
+                      )}
                     </Button>
                   </div>
 
-                  <div className="space-y-6">
-                    {/* Include Completed */}
-                    <div className="flex items-center justify-between p-3 rounded-xl bg-accent/30">
-                      <Label htmlFor="include-completed" className="cursor-pointer">
-                        Include Completed
-                      </Label>
-                      <Switch
-                        id="include-completed"
-                        checked={includeCompleted}
-                        onCheckedChange={setIncludeCompleted}
-                      />
-                    </div>
-
-                    {/* Priority Filter */}
-                    <div>
-                      <h3 className="text-sm font-semibold mb-3">Priority</h3>
-                      <div className="space-y-2">
-                        {(["high", "medium", "low"] as const).map((priority) => (
-                          <button
-                            key={priority}
-                            onClick={() => togglePriority(priority)}
-                            className={`w-full flex items-center justify-between p-3 rounded-xl transition-colors ${
-                              selectedPriorities.includes(priority)
-                                ? priority === "high"
-                                  ? "bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-800"
-                                  : priority === "medium"
-                                  ? "bg-yellow-100 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-800"
-                                  : "bg-blue-100 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-800"
-                                : "bg-accent/30 hover:bg-accent/50"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <div
-                                className={`w-3 h-3 rounded-full ${
-                                  priority === "high"
-                                    ? "bg-red-500"
-                                    : priority === "medium"
-                                    ? "bg-yellow-500"
-                                    : "bg-blue-500"
-                                }`}
-                              />
-                              <span className="capitalize text-sm font-medium">{priority}</span>
-                            </div>
-                            {selectedPriorities.includes(priority) && (
-                              <CheckSquare className="w-4 h-4" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Tags Filter */}
-                    {allTags.length > 0 && (
-                      <div>
-                        <h3 className="text-sm font-semibold mb-3">Tags</h3>
-                        <div className="flex flex-wrap gap-2">
-                          {allTags.map((tag) => (
-                            <button
-                              key={tag}
-                              onClick={() => toggleTag(tag)}
-                              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                                selectedTags.includes(tag)
-                                  ? "bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] text-white"
-                                  : "bg-accent hover:bg-accent/70"
-                              }`}
-                            >
-                              {tag}
-                              {selectedTags.includes(tag) && (
-                                <X className="w-3 h-3 inline ml-1" />
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Filtered Count */}
-                    <div className="pt-4 border-t border-border">
-                      <div className="p-3 rounded-xl bg-gradient-to-br from-[#5B8DEF]/10 to-[#8B5CF6]/10">
-                        <p className="text-sm text-muted-foreground">Tasks to schedule</p>
-                        <p className="text-2xl font-semibold">{filteredTasks.length}</p>
-                      </div>
-                    </div>
+                  <div className="h-[680px] min-h-[560px] rounded-xl bg-background">
+                    <VisualWeekScheduler blocks={visualBlocks} onChange={setVisualBlocks} />
                   </div>
-                </div>
-              </div>
 
-              {/* Right: Main Content */}
-              <div className="lg:col-span-2">
-                {!hasGenerated ? (
-                  /* Initial State */
-                  <div className="space-y-8">
-                    {/* Feature Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.1 }}
-                        className="p-6 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 border border-blue-200 dark:border-blue-800"
-                      >
-                        <div className="w-10 h-10 rounded-lg bg-blue-600 dark:bg-blue-500 flex items-center justify-center mb-4">
-                          <Calendar className="w-5 h-5 text-white" />
-                        </div>
-                        <h3 className="font-semibold mb-2">Smart Scheduling</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Automatically schedules tasks in your free time slots
-                        </p>
-                      </motion.div>
-
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.2 }}
-                        className="p-6 rounded-2xl bg-gradient-to-br from-purple-50 to-purple-100/50 dark:from-purple-950/30 dark:to-purple-900/20 border border-purple-200 dark:border-purple-800"
-                      >
-                        <div className="w-10 h-10 rounded-lg bg-purple-600 dark:bg-purple-500 flex items-center justify-center mb-4">
-                          <Zap className="w-5 h-5 text-white" />
-                        </div>
-                        <h3 className="font-semibold mb-2">Priority Aware</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Prioritizes high-importance tasks in your best focus hours
-                        </p>
-                      </motion.div>
-
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.3 }}
-                        className="p-6 rounded-2xl bg-gradient-to-br from-green-50 to-green-100/50 dark:from-green-950/30 dark:to-green-900/20 border border-green-200 dark:border-green-800"
-                      >
-                        <div className="w-10 h-10 rounded-lg bg-green-600 dark:bg-green-500 flex items-center justify-center mb-4">
-                          <CheckSquare className="w-5 h-5 text-white" />
-                        </div>
-                        <h3 className="font-semibold mb-2">Respects Preferences</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Honors your work hours, breaks, and personal time
-                        </p>
-                      </motion.div>
-                    </div>
-
-                    {/* Pending Tasks */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.4 }}
-                      className="bg-card border border-border rounded-2xl p-6"
-                    >
-                      <h2 className="text-xl font-semibold mb-4">
-                        Tasks to Schedule ({filteredTasks.length})
-                      </h2>
-                      
-                      {filteredTasks.length > 0 ? (
-                        <>
-                          <div className="space-y-2 mb-6 max-h-96 overflow-y-auto">
-                            {filteredTasks.map((task) => (
-                              <div
-                                key={task.id}
-                                className="flex items-center justify-between p-3 rounded-xl bg-accent/50"
+                  <div className="mt-5 rounded-xl border border-border bg-accent/20 p-4">
+                    <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-4">
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-xs mb-2 block font-semibold uppercase text-muted-foreground">
+                            Priorities
+                          </Label>
+                          <div className="flex flex-wrap gap-2">
+                            {["high", "medium", "low"].map((priority) => (
+                              <Button
+                                key={priority}
+                                size="sm"
+                                variant={selectedPriorities.includes(priority) ? "default" : "outline"}
+                                onClick={() => togglePriority(priority)}
+                                className="h-8 capitalize"
                               >
-                                <div className="flex items-center gap-3">
-                                  <div
-                                    className={`w-2 h-2 rounded-full ${
-                                      task.priority === "high"
-                                        ? "bg-red-500"
-                                        : task.priority === "medium"
-                                        ? "bg-yellow-500"
-                                        : "bg-blue-500"
-                                    }`}
-                                  />
-                                  <span className="font-medium">{task.title}</span>
-                                </div>
-                                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                  <span>{task.duration}m</span>
-                                  {task.dueDate && (
-                                    <span className="px-2 py-1 rounded bg-card">
-                                      Due {format(task.dueDate, "MMM d")}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
+                                {priority}
+                              </Button>
                             ))}
                           </div>
+                        </div>
 
-                          <Button
-                            onClick={handleGenerateSchedule}
-                            disabled={isGenerating}
-                            className="w-full h-14 gap-2 bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90 text-lg"
-                          >
-                            {isGenerating ? (
-                              <>
-                                <RefreshCw className="w-5 h-5 animate-spin" />
-                                Generating your perfect schedule...
-                              </>
-                            ) : (
-                              <>
-                                <Wand2 className="w-5 h-5" />
-                                Generate AI Schedule
-                              </>
-                            )}
-                          </Button>
-                        </>
-                      ) : (
-                        <div className="text-center py-12">
-                          <Filter className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                          <p className="text-lg font-medium mb-2">No tasks match your filters</p>
-                          <p className="text-muted-foreground mb-4">
-                            Adjust your filters to include more tasks
-                          </p>
-                          <Button onClick={resetFilters} variant="outline">
-                            Reset Filters
+                        {allTags.length > 0 && (
+                          <div>
+                            <Label className="text-xs mb-2 block font-semibold uppercase text-muted-foreground">
+                              Tags
+                            </Label>
+                            <div className="flex flex-wrap gap-2">
+                              {allTags.map((tag) => (
+                                <Button
+                                  key={tag}
+                                  size="sm"
+                                  variant={selectedTags.includes(tag) ? "default" : "outline"}
+                                  onClick={() => toggleTag(tag)}
+                                  className="h-8"
+                                >
+                                  {tag}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row xl:flex-col items-start sm:items-center xl:items-end gap-3">
+                        <div className="flex items-center gap-3">
+                          <Label className="text-sm">Include Completed</Label>
+                          <Switch checked={includeCompleted} onCheckedChange={setIncludeCompleted} />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-muted-foreground">{filteredTasks.length} matching tasks</span>
+                          <Button onClick={resetFilters} variant="ghost" size="sm">
+                            Reset
                           </Button>
                         </div>
-                      )}
-                    </motion.div>
-
-                    {/* Info Box */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.5 }}
-                      className="p-6 rounded-2xl bg-gradient-to-br from-[#5B8DEF]/10 to-[#8B5CF6]/10 border border-[#5B8DEF]/20"
-                    >
-                      <h3 className="font-semibold mb-2 flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-[#5B8DEF]" />
-                        How AI Planning Works
-                      </h3>
-                      <ul className="space-y-2 text-sm text-muted-foreground">
-                        <li>• Analyzes your calendar for available time slots</li>
-                        <li>• Considers task priorities, durations, and deadlines</li>
-                        <li>• Respects your schedule preferences from your profile</li>
-                        <li>• Optimizes for your peak productivity hours</li>
-                        <li>• Leaves buffer time between tasks for flexibility</li>
-                      </ul>
-                    </motion.div>
+                      </div>
+                    </div>
                   </div>
-                ) : (
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.5 }}
+                  className="p-6 rounded-2xl bg-gradient-to-br from-[#5B8DEF]/10 to-[#8B5CF6]/10 border border-[#5B8DEF]/20"
+                >
+                  <h3 className="font-semibold mb-2 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#5B8DEF]" />
+                    How AI Planning Works
+                  </h3>
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li>• Analyzes your calendar for available time slots</li>
+                    <li>• Considers task priorities, durations, and deadlines</li>
+                    <li>• Respects your schedule preferences from your profile</li>
+                    <li>• Optimizes for your peak productivity hours</li>
+                    <li>• Leaves buffer time between tasks for flexibility</li>
+                  </ul>
+                </motion.div>
+              </div>
+            ) : (
                   /* Generated Schedule */
                   <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
@@ -621,9 +613,7 @@ export function AIPlanner() {
                       Generate New Schedule
                     </Button>
                   </motion.div>
-                )}
-              </div>
-            </div>
+            )}
           </TabsContent>
 
           <TabsContent value="chat" className="mt-0">

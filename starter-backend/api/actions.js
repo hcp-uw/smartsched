@@ -73,10 +73,15 @@ export async function generateResponse(prompt, context = {}) {
 
         const result = await chatSession.sendMessage(prompt);
         const responseText = result.response.text();
-        console.log(responseText);
+        console.log("AI Response:", responseText);
         return responseText;
     } catch (error) {
-        console.error("Error generating AI response:", error);
-        throw new Error("Failed to generate AI response");
+        console.error("CRITICAL: Error generating AI response:", {
+            error: error.message,
+            stack: error.stack,
+            prompt: prompt,
+            contextHistoryLength: context.history?.length
+        });
+        throw new Error(`AI Service Error: ${error.message}`);
     }
 }

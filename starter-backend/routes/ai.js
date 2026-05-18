@@ -15,8 +15,15 @@ router.post("/chat", authMiddleware, async (req, res) => {
         const response = await generateResponse(prompt, context);
         res.json({ response });
     } catch (error) {
-        console.error("AI Chat Error:", error);
-        res.status(500).json({ error: error.message});
+        console.error("AI Route Error:", {
+            message: error.message,
+            stack: error.stack,
+            body: req.body
+        });
+        res.status(500).json({ 
+            error: "Failed to process AI request", 
+            details: error.message 
+        });
     }
 });
 
