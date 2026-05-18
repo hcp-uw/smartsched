@@ -213,7 +213,7 @@ export function Profile() {
 
                 {/* Email */}
                 <p className="text-sm text-muted-foreground">
-                  {profile?.email || "No email found"}
+                  {form.email || "No email found"}
                 </p>
               </div>
               <div className="space-y-4">
