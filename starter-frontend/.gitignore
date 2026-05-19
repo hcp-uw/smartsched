@@ -19,7 +19,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# Environmental Variables
+# Environmental Variables (keep .env.example committed as a template)
 *.env
-*.env.example
 *.env.staging

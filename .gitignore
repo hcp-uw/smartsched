@@ -74,6 +74,7 @@ web_modules/
 
 # dotenv environment variable files
 starter-frontend/.env
+starter-backend/.env
 .env.development.local
 .env.test.local
 .env.production.local
@@ -128,7 +129,5 @@ dist
 .yarn/unplugged
 .yarn/build-state.yml
 .yarn/install-state.gz
-.pnp.*
-
-#environment variables
-starter-frontend/.env
+.pnp.*lib.json 
+lib.json 
