@@ -47,7 +47,7 @@ export function TaskModal({ open, onClose, task, onSave, onDelete }: TaskModalPr
     if (!title.trim()) return;
 
     const newTask: Task = {
-      id: task?.id || `task-${Date.now()}`,
+      id: task?.id || crypto.randomUUID(),
       title,
       completed: task?.completed || false,
       priority,
