@@ -6,8 +6,10 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { CalendarEvent, mockCalendarSources } from "../data/mockData";
+import { CalendarEvent } from "../data/mockData";
 import { format } from "date-fns";
+import { useApp } from "../context/AppContext";
+import { calendarIdFromColor } from "../lib/supabaseCalendarTask";
 
 interface EventModalProps {
   open: boolean;
@@ -28,6 +30,7 @@ const colorOptions = [
 ];
 
 export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate, defaultStartTime }: EventModalProps) {
+  const { calendars } = useApp();
   const [title, setTitle] = useState("");
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -46,6 +49,9 @@ export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate
       setEndDate(format(event.end, "yyyy-MM-dd"));
       setEndTime(format(event.end, "HH:mm"));
       setColor(event.color);
+      setSelectedCalendar(
+        event.calendarId ?? calendarIdFromColor(event.color, calendars)
+      );
     } else if (defaultDate) {
       setStartDate(format(defaultDate, "yyyy-MM-dd"));
       setEndDate(format(defaultDate, "yyyy-MM-dd"));
@@ -63,11 +69,26 @@ export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate
       setEndDate(format(new Date(), "yyyy-MM-dd"));
       setStartTime("09:00");
       setEndTime("10:00");
-      setColor("#5B8DEF");
+      setColor(calendars[0]?.color ?? "#5B8DEF");
+      setSelectedCalendar(calendars[0]?.id ?? "cal1");
       setTags("");
       setDescription("");
     }
-  }, [event, defaultDate, defaultStartTime, open]);
+  }, [event, defaultDate, defaultStartTime, open, calendars]);
+
+  const handleCalendarChange = (calendarId: string) => {
+    setSelectedCalendar(calendarId);
+    const cal = calendars.find((c) => c.id === calendarId);
+    if (cal) setColor(cal.color);
+  };
+
+  const handleColorChange = (newColor: string) => {
+    setColor(newColor);
+    const match = calendars.find(
+      (c) => c.color.toLowerCase() === newColor.toLowerCase()
+    );
+    if (match) setSelectedCalendar(match.id);
+  };
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -75,13 +96,15 @@ export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate
     const startDateTime = new Date(`${startDate}T${startTime}`);
     const endDateTime = new Date(`${endDate}T${endTime}`);
 
+    const cal = calendars.find((c) => c.id === selectedCalendar);
     const newEvent: CalendarEvent = {
       id: event?.id || crypto.randomUUID(),
       title,
       start: startDateTime,
       end: endDateTime,
       category: "work",
-      color,
+      color: cal?.color ?? color,
+      calendarId: selectedCalendar,
     };
 
     onSave(newEvent);
@@ -168,12 +191,12 @@ export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate
           {/* Calendar Selection */}
           <div>
             <Label htmlFor="calendar">Calendar</Label>
-            <Select value={selectedCalendar} onValueChange={setSelectedCalendar}>
+            <Select value={selectedCalendar} onValueChange={handleCalendarChange}>
               <SelectTrigger className="mt-2">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {mockCalendarSources.map((cal) => (
+                {calendars.map((cal) => (
                   <SelectItem key={cal.id} value={cal.id}>
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cal.color }} />
@@ -195,7 +218,7 @@ export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate
               {colorOptions.map((option) => (
                 <button
                   key={option.value}
-                  onClick={() => setColor(option.value)}
+                  onClick={() => handleColorChange(option.value)}
                   className={`w-10 h-10 rounded-lg transition-all ${
                     color === option.value
                       ? "ring-2 ring-primary ring-offset-2 scale-110"

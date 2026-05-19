@@ -9,6 +9,7 @@ import { format, addDays, startOfWeek, isSameDay, addMonths, startOfMonth, endOf
 import { CalendarEvent } from "../data/mockData";
 import { EventModal } from "../components/EventModal";
 import { ImportCalendarModal } from "../components/ImportCalendarModal";
+import { DraggableCalendarEvent } from "../components/DraggableCalendarEvent";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { generateAISchedule } from "../utils/aiScheduler";
@@ -234,6 +235,10 @@ export function Calendar() {
   const handleDeleteEvent = (id: string) => {
     deleteEvent(id);
     toast.success("Event deleted!");
+  };
+
+  const handleEventScheduleChange = (id: string, start: Date, end: Date) => {
+    updateEvent(id, { start, end });
   };
 
   const handleImportCalendar = (name: string, color: string) => {
@@ -510,7 +515,11 @@ export function Calendar() {
                         </div>
 
                         {/* Time Grid with current day highlight */}
-                        <div className={`relative ${isToday ? "bg-accent/5" : ""}`}>
+                        <motion.div
+                          data-calendar-time-grid
+                          data-day={format(day, "yyyy-MM-dd")}
+                          className={`relative ${isToday ? "bg-accent/5" : ""}`}
+                        >
                           {hours.map((hour) => (
                             <div
                               key={hour}
@@ -535,34 +544,19 @@ export function Calendar() {
                           {getEventsForDay(day).map((event) => {
                             const { top, height } = getEventPosition(event);
                             return (
-                              <motion.div
+                              <DraggableCalendarEvent
                                 key={event.id}
-                                initial={event.isAIGenerated ? { opacity: 0, scale: 0.9 } : false}
-                                animate={{ opacity: event.isAIGenerated ? 0.6 : 1, scale: 1 }}
-                                onDoubleClick={() => handleEventClick(event)}
-                                className={`absolute left-1 right-1 rounded-lg p-2 cursor-pointer transition-all hover:scale-105 hover:shadow-lg overflow-hidden ${
-                                  event.isAIGenerated ? "border-2 border-dashed border-[#5B8DEF]" : ""
-                                }`}
-                                style={{
-                                  top: `${top}px`,
-                                  height: `${height}px`,
-                                  backgroundColor: event.color + (event.isAIGenerated ? "40" : ""),
-                                  zIndex: event.isAIGenerated ? 5 : 10,
-                                  minHeight: "20px",
-                                }}
-                              >
-                                <p className="text-xs font-medium text-white line-clamp-1">
-                                  {event.title}
-                                </p>
-                                {height > 30 && (
-                                  <p className="text-xs text-white/80">
-                                    {format(event.start, "h:mm a")}
-                                  </p>
-                                )}
-                              </motion.div>
+                                event={event}
+                                top={top}
+                                height={height}
+                                hourHeight={hourHeight}
+                                compact
+                                onScheduleChange={handleEventScheduleChange}
+                                onOpen={handleEventClick}
+                              />
                             );
                           })}
-                        </div>
+                        </motion.div>
                       </div>
                     );
                   })}
@@ -606,7 +600,11 @@ export function Calendar() {
                   }`}>
                     <span className="text-2xl font-semibold">{format(currentDate, "EEEE, MMMM d")}</span>
                   </div>
-                  <div className={`relative ${isSameDay(currentDate, new Date()) ? "bg-accent/5" : ""}`}>
+                  <motion.div
+                    data-calendar-time-grid
+                    data-day={format(currentDate, "yyyy-MM-dd")}
+                    className={`relative ${isSameDay(currentDate, new Date()) ? "bg-accent/5" : ""}`}
+                  >
                     {hours.map((hour) => (
                       <div
                         key={hour}
@@ -631,29 +629,18 @@ export function Calendar() {
                     {getEventsForDay(currentDate).map((event) => {
                       const { top, height } = getEventPosition(event);
                       return (
-                        <motion.div
+                        <DraggableCalendarEvent
                           key={event.id}
-                          initial={event.isAIGenerated ? { opacity: 0, scale: 0.9 } : false}
-                          animate={{ opacity: event.isAIGenerated ? 0.6 : 1, scale: 1 }}
-                          onDoubleClick={() => handleEventClick(event)}
-                          className={`absolute left-4 right-4 rounded-lg p-4 cursor-pointer hover:shadow-lg ${
-                            event.isAIGenerated ? "border-2 border-dashed border-[#5B8DEF]" : ""
-                          }`}
-                          style={{
-                            top: `${top}px`,
-                            height: `${height}px`,
-                            backgroundColor: event.color + (event.isAIGenerated ? "40" : ""),
-                            zIndex: event.isAIGenerated ? 5 : 10,
-                          }}
-                        >
-                          <p className="font-medium text-white">{event.title}</p>
-                          <p className="text-sm text-white/80">
-                            {format(event.start, "h:mm a")} - {format(event.end, "h:mm a")}
-                          </p>
-                        </motion.div>
+                          event={event}
+                          top={top}
+                          height={height}
+                          hourHeight={hourHeight}
+                          onScheduleChange={handleEventScheduleChange}
+                          onOpen={handleEventClick}
+                        />
                       );
                     })}
-                  </div>
+                  </motion.div>
                 </div>
               </div>
             </div>
