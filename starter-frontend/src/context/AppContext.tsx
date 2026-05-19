@@ -1,5 +1,4 @@
-// App-wide state. Events and tasks load/persist via Supabase when signed in
-// (see lib/supabaseCalendarTask.ts). Calendars and deadlines stay local (mock).
+// App-wide state. Events, tasks, and calendar toggles persist via Supabase when signed in.
 
 import {
   createContext,
@@ -17,7 +16,6 @@ import {
   CalendarSource,
   Deadline,
   mockCalendarSources,
-  mockDeadlines,
 } from "../data/mockData";
 import {
   ensureUuid,
@@ -33,6 +31,10 @@ import {
   isPersistedEventId,
 } from "../lib/supabaseCalendarTask";
 import { formatErrorMessage } from "../lib/formatError";
+import {
+  fetchUserCalendars,
+  saveUserCalendars,
+} from "../lib/supabaseCalendars";
 
 interface AppState {
   // Data State
@@ -85,13 +87,16 @@ export function AppProvider({ children }: AppProviderProps) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [calendars, setCalendars] = useState<CalendarSource[]>(mockCalendarSources);
-  const [deadlines] = useState<Deadline[]>(mockDeadlines);
+  const [calendarsHydrated, setCalendarsHydrated] = useState(false);
+  const [deadlines] = useState<Deadline[]>([]);
   const [aiGeneratedEvents, setAIGeneratedEvents] = useState<CalendarEvent[]>([]);
 
   const tasksRef = useRef<Task[]>([]);
   const eventsRef = useRef<CalendarEvent[]>([]);
+  const calendarsRef = useRef<CalendarSource[]>(mockCalendarSources);
   tasksRef.current = tasks;
   eventsRef.current = events;
+  calendarsRef.current = calendars;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -105,6 +110,8 @@ export function AppProvider({ children }: AppProviderProps) {
 
   useEffect(() => {
     if (!userId) {
+      setCalendars(mockCalendarSources.map((c) => ({ ...c })));
+      setCalendarsHydrated(false);
       setEvents([]);
       setTasks([]);
       return;
@@ -133,6 +140,46 @@ export function AppProvider({ children }: AppProviderProps) {
       cancelled = true;
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    setCalendarsHydrated(false);
+    void (async () => {
+      try {
+        const loaded = await fetchUserCalendars(userId);
+        if (!cancelled) {
+          setCalendars(loaded);
+          setCalendarsHydrated(true);
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setCalendars(mockCalendarSources.map((c) => ({ ...c })));
+          setCalendarsHydrated(true);
+          toast.error(
+            `Could not load calendars. ${formatErrorMessage(err)}`
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !calendarsHydrated) return;
+    const timer = window.setTimeout(() => {
+      void saveUserCalendars(userId, calendarsRef.current).catch((err) => {
+        console.error(err);
+        toast.error(
+          `Could not save calendar settings. ${formatErrorMessage(err)}`
+        );
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [calendars, userId, calendarsHydrated]);
 
   useEffect(() => {
     if (!userId) return;

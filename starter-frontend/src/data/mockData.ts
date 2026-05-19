@@ -250,6 +250,12 @@ export const mockCalendarSources: CalendarSource[] = [
     color: "#10B981",
     visible: true,
   },
+  {
+    id: "cal5",
+    name: "Classes",
+    color: "#F59E0B",
+    visible: true,
+  },
 ];
 
 // ============================================================================
