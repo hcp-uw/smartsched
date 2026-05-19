@@ -34,12 +34,12 @@ export function Calendar() {
     events,
     tasks,
     calendars,
-    deadlines,
     aiGeneratedEvents,
     addEvent,
     updateEvent,
     deleteEvent,
     addCalendar,
+    updateCalendar,
     toggleCalendarVisibility,
     setAIGeneratedEvents,
     acceptAISchedule,
@@ -89,30 +89,12 @@ export function Calendar() {
     })
     .slice(0, 10);
 
-  // Combine tasks and deadlines into "Upcoming Tasks"
-  const upcomingItems = [
-    ...incompleteTasks.map((task) => ({
-      id: task.id,
-      title: task.title,
-      date: task.dueDate,
-      priority: task.priority,
-      type: "task" as const,
-    })),
-    ...deadlines.slice(0, 10).map((deadline) => ({
-      id: deadline.id,
-      title: deadline.title,
-      date: deadline.date,
-      priority: deadline.priority,
-      type: "deadline" as const,
-    })),
-  ]
-    .sort((a, b) => {
-      if (!a.date && !b.date) return 0;
-      if (!a.date) return 1;
-      if (!b.date) return -1;
-      return a.date.getTime() - b.date.getTime();
-    })
-    .slice(0, 10);
+  const upcomingItems = incompleteTasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    date: task.dueDate,
+    priority: task.priority,
+  }));
 
   // Get month view data
   const monthStart = startOfMonth(currentDate);
@@ -326,7 +308,15 @@ export function Calendar() {
                         className="w-3 h-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: cal.color }}
                       />
-                      <span className="text-sm font-medium truncate">{cal.name}</span>
+                      <input
+                        type="text"
+                        value={cal.name}
+                        onChange={(e) =>
+                          updateCalendar(cal.id, { name: e.target.value })
+                        }
+                        className="text-sm font-medium truncate bg-transparent border-0 outline-none focus:ring-1 focus:ring-primary/40 rounded px-1 w-full min-w-0"
+                        aria-label={`Rename ${cal.name}`}
+                      />
                     </div>
                     <Switch
                       checked={cal.visible}
@@ -348,6 +338,11 @@ export function Calendar() {
             {/* Section Content - Scrollable */}
             <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0">
               <div className="px-6 py-4 space-y-2">
+                {upcomingItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground px-1 py-2">
+                    No upcoming tasks. Add tasks on the Tasks page.
+                  </p>
+                ) : null}
                 {upcomingItems.map((item) => (
                   <div
                     key={item.id}

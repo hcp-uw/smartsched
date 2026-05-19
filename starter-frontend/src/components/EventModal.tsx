@@ -26,7 +26,7 @@ const colorOptions = [
   { name: "Personal", value: "#8B5CF6" },
   { name: "Meeting", value: "#EC4899" },
   { name: "Focus", value: "#10B981" },
-  { name: "Break", value: "#F59E0B" },
+  { name: "Classes", value: "#F59E0B" },
 ];
 
 export function EventModal({ open, onClose, event, onSave, onDelete, defaultDate, defaultStartTime }: EventModalProps) {
