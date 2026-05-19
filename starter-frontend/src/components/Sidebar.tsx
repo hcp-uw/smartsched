@@ -23,11 +23,11 @@ export function Sidebar() {
         <Link to="/" className="flex items-center gap-3 group">
           
           {/* Logo */}
-          <div className="w-16 h-16 flex items-center justify-center overflow-hidden shrink-0">
+          <div className="w-20 h-20 flex items-center justify-center shrink-0">
             <img
               src="/logo.png"
               alt="SmartSched"
-              className="w-60 h-60 object-contain"
+              className="w-full h-full object-contain"
             />
           </div>
 
