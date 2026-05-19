@@ -58,6 +58,92 @@ function isMissingColumnError(error: { message?: string; code?: string }): boole
   );
 }
 
+function isDuplicateKeyError(error: { message?: string; code?: string }): boolean {
+  return (
+    error.code === "23505" ||
+    Boolean(error.message?.includes("duplicate key"))
+  );
+}
+
+function isNullIdError(error: { message?: string; code?: string }): boolean {
+  return (
+    error.code === "23502" ||
+    Boolean(error.message?.match(/null value.*\bid\b/i))
+  );
+}
+
+/** Postgres identity/sequence: app must not send `id`. */
+function isGeneratedIdColumnError(error: { message?: string }): boolean {
+  return Boolean(
+    error.message?.includes("cannot insert a non-DEFAULT value into column") &&
+    error.message?.includes('"id"')
+  );
+}
+
+function sequenceResyncHint(table: "tasks" | "events"): string {
+  return (
+    `In Supabase → SQL Editor, run:\n` +
+    `select setval(pg_get_serial_sequence('public.${table}','id'), ` +
+    `coalesce((select max(id) from public.${table}), 0) + 1, false);`
+  );
+}
+
+/**
+ * Insert without `id` when the DB uses a sequence/identity (recommended).
+ * Legacy DBs without a default on `id` fall back to manual ids + duplicate retry.
+ */
+async function insertWithUniqueIntegerId<T>(
+  table: "tasks" | "events",
+  nextId: () => Promise<number>,
+  buildRow: (id?: number) => Record<string, unknown>,
+  select: string,
+  mapRow: (row: unknown) => T
+): Promise<T> {
+  const auto = await supabase
+    .from(table)
+    .insert(buildRow())
+    .select(select)
+    .single();
+
+  if (!auto.error && auto.data) return mapRow(auto.data);
+
+  if (auto.error && !isNullIdError(auto.error)) {
+    if (isDuplicateKeyError(auto.error)) {
+      throw new Error(
+        `Could not create ${table} (duplicate id). ${sequenceResyncHint(table)}`
+      );
+    }
+    throw auto.error;
+  }
+
+  // Legacy: table has no default on id — assign ids manually (RLS-safe retry)
+  let id = await nextId();
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const { data, error } = await supabase
+      .from(table)
+      .insert(buildRow(id))
+      .select(select)
+      .single();
+
+    if (!error && data) return mapRow(data);
+    if (error && isGeneratedIdColumnError(error)) {
+      throw new Error(
+        `This project uses auto-generated ${table} ids. Do not set id manually. ` +
+          `If saves fail, ${sequenceResyncHint(table)}`
+      );
+    }
+    if (error && isDuplicateKeyError(error)) {
+      id++;
+      continue;
+    }
+    throw error;
+  }
+
+  throw new Error(
+    `Could not create ${table} row (id conflict). ${sequenceResyncHint(table)}`
+  );
+}
+
 function taskPriorityToInt(p: Task["priority"]): number {
   if (p === "low") return 0;
   if (p === "medium") return 1;
@@ -174,58 +260,111 @@ async function writeEventRow(
   userId: string,
   eventId?: number
 ): Promise<CalendarEvent | void> {
-  const payloads = buildEventWritePayloads(event);
-  let lastError: Error | null = null;
-  const nextId = mode === "insert" ? await nextEventsTableId() : undefined;
+  if (mode === "insert") {
+    const payloads = buildEventWritePayloads(event);
+    let lastError: Error | null = null;
 
-  for (const payload of payloads) {
-    if (mode === "insert") {
+    for (const payload of payloads) {
+      const row = { user_id: userId, ...payload };
+
       const { data, error } = await supabase
         .from("events")
-        .insert({ id: nextId!, user_id: userId, ...payload })
+        .insert(row)
         .select(EVENT_COLUMNS_FULL)
         .single();
 
       if (!error && data) return calendarEventFromRow(data as EventsRow);
 
+      if (error && isDuplicateKeyError(error)) {
+        throw new Error(
+          `Could not create event (duplicate id). ${sequenceResyncHint("events")}`
+        );
+      }
+
       if (error && isMissingColumnError(error)) {
         const { data: d2, error: e2 } = await supabase
           .from("events")
-          .insert({ id: nextId!, user_id: userId, ...payload })
+          .insert(row)
           .select(EVENT_COLUMNS_LEGACY)
           .single();
         if (!e2 && d2) return calendarEventFromRow(d2 as EventsRow);
+        if (e2 && isDuplicateKeyError(e2)) {
+          throw new Error(
+            `Could not create event (duplicate id). ${sequenceResyncHint("events")}`
+          );
+        }
         lastError = e2 ?? error;
         continue;
       }
-      if (error) throw error;
-    } else {
-      const id = eventId!;
-      const { data, error } = await supabase
-        .from("events")
-        .update(payload)
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select("id")
-        .maybeSingle();
 
-      if (!error && data) return;
-      if (error && isMissingColumnError(error)) {
+      if (error && isNullIdError(error)) {
         lastError = error;
-        continue;
+        break;
       }
+
       if (error) throw error;
     }
-  }
 
-  if (mode === "update") {
+    if (lastError && isNullIdError(lastError)) {
+      let id = await nextEventsTableId();
+      for (let attempt = 0; attempt < 30; attempt++) {
+        for (const payload of payloads) {
+          const row = { id, user_id: userId, ...payload };
+          const { data, error } = await supabase
+            .from("events")
+            .insert(row)
+            .select(EVENT_COLUMNS_FULL)
+            .single();
+
+          if (!error && data) return calendarEventFromRow(data as EventsRow);
+
+          if (error && isGeneratedIdColumnError(error)) {
+            throw new Error(
+              `Events use auto-generated ids. ${sequenceResyncHint("events")}`
+            );
+          }
+          if (error && isDuplicateKeyError(error)) {
+            id++;
+            break;
+          }
+          if (error) throw error;
+        }
+      }
+    }
+
     throw new Error(
       lastError
-        ? `Could not save event length. Run starter-backend/supabase/events_duration.sql in Supabase (adds end_date), then reload the API schema. (${lastError.message})`
-        : "Could not save event length. Run events_duration.sql in Supabase."
+        ? `Could not create event (${lastError.message})`
+        : "Could not create event."
     );
   }
-  throw lastError ?? new Error("Could not save event");
+
+  const payloads = buildEventWritePayloads(event);
+  let lastError: Error | null = null;
+  const id = eventId!;
+
+  for (const payload of payloads) {
+    const { data, error } = await supabase
+      .from("events")
+      .update(payload)
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select("id")
+      .maybeSingle();
+
+    if (!error && data) return;
+    if (error && isMissingColumnError(error)) {
+      lastError = error;
+      continue;
+    }
+    if (error) throw error;
+  }
+
+  throw new Error(
+    lastError
+      ? `Could not save event. Run starter-backend/supabase/events_duration.sql in Supabase, then reload the API schema. (${lastError.message})`
+      : "Could not save event."
+  );
 }
 
 export async function fetchCalendarEvents(): Promise<CalendarEvent[]> {
@@ -261,7 +400,7 @@ export async function insertCalendarEvents(
   userId: string
 ) {
   for (const event of events) {
-    await writeEventRow("insert", event, userId);
+    await insertCalendarEvent(event, userId);
   }
 }
 
@@ -313,26 +452,27 @@ export async function fetchTasks(): Promise<Task[]> {
   return ((data || []) as TasksRow[]).map(taskFromRow);
 }
 
+const TASK_COLUMNS =
+  "id,user_id,task_name,due_date,priority,status,color,created_at,updated_at";
+
 export async function insertTask(task: Task, userId: string) {
-  const nextId = await nextTasksTableId();
-  const row = {
-    id: nextId,
-    user_id: userId,
-    task_name: task.title,
-    due_date: task.dueDate ? task.dueDate.toISOString() : null,
-    priority: taskPriorityToInt(task.priority),
-    status: task.completed ? "completed" : "pending",
-    color: hexToColorInt("#5B8DEF"),
-  };
-  const { data, error } = await supabase
-    .from("tasks")
-    .insert(row)
-    .select(
-      "id,user_id,task_name,due_date,priority,status,color,created_at,updated_at"
-    )
-    .single();
-  if (error) throw error;
-  return taskFromRow(data as TasksRow);
+  return insertWithUniqueIntegerId(
+    "tasks",
+    nextTasksTableId,
+    (id) => {
+      const base = {
+        user_id: userId,
+        task_name: task.title,
+        due_date: task.dueDate ? task.dueDate.toISOString() : null,
+        priority: taskPriorityToInt(task.priority),
+        status: task.completed ? "completed" : "pending",
+        color: hexToColorInt("#5B8DEF"),
+      };
+      return id === undefined ? base : { id, ...base };
+    },
+    TASK_COLUMNS,
+    (row) => taskFromRow(row as TasksRow)
+  );
 }
 
 export async function updateTaskRow(merged: Task) {
