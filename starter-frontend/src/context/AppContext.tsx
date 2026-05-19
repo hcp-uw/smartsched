@@ -1,33 +1,37 @@
-// ============================================================================
-// STATE MANAGEMENT - PRODUCTION-READY
-// ============================================================================
-// This context provides centralized state management for the entire app.
-// All state updates go through this context, making it easy to:
-// 1. Replace other state management libraries
-// 2. Add API integration by replacing state setters with API calls
-// 3. Add optimistic updates and error handling
-//
-// TO INTEGRATE WITH BACKEND:
-// 1. Replace initial state with API fetches (useEffect in provider)
-// 2. Replace setter functions with API calls (POST, PUT, DELETE)
-// 3. Add loading states and error handling
-// ============================================================================
+// App-wide state. Events and tasks load/persist via Supabase when signed in
+// (see lib/supabaseCalendarTask.ts). Calendars and deadlines stay local (mock).
 
-import { createContext, useContext, useState, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useRef,
+  ReactNode,
+} from "react";
+import { toast } from "sonner";
+import { supabase } from "../supabaseClient";
 import {
   CalendarEvent,
   Task,
   CalendarSource,
   Deadline,
-  mockEvents,
-  mockTasks,
   mockCalendarSources,
   mockDeadlines,
 } from "../data/mockData";
-
-// ============================================================================
-// CONTEXT TYPES (PRODUCTION-READY)
-// ============================================================================
+import {
+  ensureUuid,
+  fetchCalendarEvents,
+  fetchTasks,
+  insertCalendarEvent,
+  insertCalendarEvents,
+  insertTask,
+  updateCalendarEventRow,
+  updateTaskRow,
+  deleteCalendarEvent,
+  deleteTaskRow,
+} from "../lib/supabaseCalendarTask";
+import { formatErrorMessage } from "../lib/formatError";
 
 interface AppState {
   // Data State
@@ -71,149 +75,229 @@ interface AppState {
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
-// ============================================================================
-// PROVIDER COMPONENT (PRODUCTION-READY)
-// ============================================================================
-
 interface AppProviderProps {
   children: ReactNode;
 }
 
 export function AppProvider({ children }: AppProviderProps) {
-  // ============================================================================
-  // STATE INITIALIZATION
-  // ============================================================================
-  // Currently initialized with mock data.
-  // In production, replace with API calls in useEffect:
-  //
-  // useEffect(() => {
-  //   async function fetchData() {
-  //     const [events, tasks, calendars] = await Promise.all([
-  //       fetch('/api/events').then(r => r.json()),
-  //       fetch('/api/tasks').then(r => r.json()),
-  //       fetch('/api/calendars').then(r => r.json()),
-  //     ]);
-  //     setEvents(events);
-  //     setTasks(tasks);
-  //     setCalendars(calendars);
-  //   }
-  //   fetchData();
-  // }, []);
-  // ============================================================================
-
-  const [events, setEvents] = useState<CalendarEvent[]>(mockEvents);
-  const [tasks, setTasks] = useState<Task[]>(mockTasks);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [calendars, setCalendars] = useState<CalendarSource[]>(mockCalendarSources);
   const [deadlines] = useState<Deadline[]>(mockDeadlines);
   const [aiGeneratedEvents, setAIGeneratedEvents] = useState<CalendarEvent[]>([]);
 
-  // ============================================================================
-  // EVENT ACTIONS (PRODUCTION-READY)
-  // ============================================================================
-  // In production, each action should make an API call:
-  // - addEvent: POST /api/events
-  // - updateEvent: PUT /api/events/:id
-  // - deleteEvent: DELETE /api/events/:id
-  // ============================================================================
+  const tasksRef = useRef<Task[]>([]);
+  const eventsRef = useRef<CalendarEvent[]>([]);
+  tasksRef.current = tasks;
+  eventsRef.current = events;
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setUserId(data.session?.user.id ?? null);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user.id ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!userId) {
+      setEvents([]);
+      setTasks([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [ev, ta] = await Promise.all([
+          fetchCalendarEvents(),
+          fetchTasks(),
+        ]);
+        if (!cancelled) {
+          setEvents(ev);
+          setTasks(ta);
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          toast.error(
+            `Could not load events or tasks. ${formatErrorMessage(err)}`
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`user-data-${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "events",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void fetchCalendarEvents()
+            .then(setEvents)
+            .catch(console.error);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "tasks",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          void fetchTasks().then(setTasks).catch(console.error);
+        }
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [userId]);
 
   const addEvent = (event: CalendarEvent) => {
-    // Production: await fetch('/api/events', { method: 'POST', body: JSON.stringify(event) })
-    setEvents((prev) => [...prev, event]);
+    const normalized = { ...event, id: ensureUuid(event.id) };
+    setEvents((prev) => [...prev, normalized]);
+    if (!userId) return;
+    void (async () => {
+      try {
+        const saved = await insertCalendarEvent(normalized, userId);
+        setEvents((prev) =>
+          prev.map((e) => (e.id === normalized.id ? saved : e))
+        );
+      } catch (err) {
+        console.error(err);
+        toast.error(`Could not save event. ${formatErrorMessage(err)}`);
+        setEvents((prev) => prev.filter((e) => e.id !== normalized.id));
+      }
+    })();
   };
 
   const updateEvent = (id: string, updates: Partial<CalendarEvent>) => {
-    // Production: await fetch(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(updates) })
+    const existing = eventsRef.current.find((e) => e.id === id);
+    if (!existing) return;
+    const merged = { ...existing, ...updates };
     setEvents((prev) =>
-      prev.map((event) => (event.id === id ? { ...event, ...updates } : event))
+      prev.map((event) => (event.id === id ? merged : event))
     );
+    if (!userId) return;
+    void updateCalendarEventRow(merged).catch((err) => {
+      console.error(err);
+      toast.error(`Could not update event. ${formatErrorMessage(err)}`);
+      void fetchCalendarEvents().then(setEvents).catch(console.error);
+    });
   };
 
   const deleteEvent = (id: string) => {
-    // Production: await fetch(`/api/events/${id}`, { method: 'DELETE' })
     setEvents((prev) => prev.filter((event) => event.id !== id));
+    if (!userId) return;
+    void deleteCalendarEvent(id).catch((err) => {
+      console.error(err);
+      toast.error(`Could not delete event. ${formatErrorMessage(err)}`);
+      void fetchCalendarEvents().then(setEvents).catch(console.error);
+    });
   };
 
-  // ============================================================================
-  // TASK ACTIONS (PRODUCTION-READY)
-  // ============================================================================
-  // In production:
-  // - addTask: POST /api/tasks
-  // - updateTask: PUT /api/tasks/:id
-  // - deleteTask: DELETE /api/tasks/:id
-  // - toggleTask: PATCH /api/tasks/:id/toggle
-  // ============================================================================
-
   const addTask = (task: Task) => {
-    // Production: await fetch('/api/tasks', { method: 'POST', body: JSON.stringify(task) })
-    setTasks((prev) => [task, ...prev]);
+    const normalized = { ...task, id: ensureUuid(task.id) };
+    setTasks((prev) => [normalized, ...prev]);
+    if (!userId) return;
+    void (async () => {
+      try {
+        const saved = await insertTask(normalized, userId);
+        setTasks((prev) =>
+          prev.map((t) => (t.id === normalized.id ? saved : t))
+        );
+      } catch (err) {
+        console.error(err);
+        toast.error(`Could not save task. ${formatErrorMessage(err)}`);
+        setTasks((prev) => prev.filter((t) => t.id !== normalized.id));
+      }
+    })();
   };
 
   const updateTask = (id: string, updates: Partial<Task>) => {
-    // Production: await fetch(`/api/tasks/${id}`, { method: 'PUT', body: JSON.stringify(updates) })
+    const existing = tasksRef.current.find((t) => t.id === id);
+    if (!existing) return;
+    const merged = { ...existing, ...updates };
     setTasks((prev) =>
-      prev.map((task) => (task.id === id ? { ...task, ...updates } : task))
+      prev.map((task) => (task.id === id ? merged : task))
     );
+    if (!userId) return;
+    void updateTaskRow(merged).catch((err) => {
+      console.error(err);
+      toast.error(`Could not update task. ${formatErrorMessage(err)}`);
+      void fetchTasks().then(setTasks).catch(console.error);
+    });
   };
 
   const deleteTask = (id: string) => {
-    // Production: await fetch(`/api/tasks/${id}`, { method: 'DELETE' })
     setTasks((prev) => prev.filter((task) => task.id !== id));
+    if (!userId) return;
+    void deleteTaskRow(id).catch((err) => {
+      console.error(err);
+      toast.error(`Could not delete task. ${formatErrorMessage(err)}`);
+      void fetchTasks().then(setTasks).catch(console.error);
+    });
   };
 
   const toggleTask = (id: string) => {
-    // Production: await fetch(`/api/tasks/${id}/toggle`, { method: 'PATCH' })
+    const task = tasksRef.current.find((t) => t.id === id);
+    if (!task) return;
+    const merged = { ...task, completed: !task.completed };
     setTasks((prev) =>
-      prev.map((task) =>
-        task.id === id ? { ...task, completed: !task.completed } : task
-      )
+      prev.map((t) => (t.id === id ? merged : t))
     );
+    if (!userId) return;
+    void updateTaskRow(merged).catch((err) => {
+      console.error(err);
+      toast.error(`Could not update task. ${formatErrorMessage(err)}`);
+      void fetchTasks().then(setTasks).catch(console.error);
+    });
   };
 
-  // ============================================================================
-  // CALENDAR ACTIONS (PRODUCTION-READY)
-  // ============================================================================
-  // In production:
-  // - addCalendar: POST /api/calendars
-  // - updateCalendar: PUT /api/calendars/:id
-  // - toggleCalendarVisibility: PATCH /api/calendars/:id/visibility
-  // ============================================================================
-
   const addCalendar = (calendar: CalendarSource) => {
-    // Production: await fetch('/api/calendars', { method: 'POST', body: JSON.stringify(calendar) })
     setCalendars((prev) => [...prev, calendar]);
   };
 
   const updateCalendar = (id: string, updates: Partial<CalendarSource>) => {
-    // Production: await fetch(`/api/calendars/${id}`, { method: 'PUT', body: JSON.stringify(updates) })
     setCalendars((prev) =>
       prev.map((cal) => (cal.id === id ? { ...cal, ...updates } : cal))
     );
   };
 
   const toggleCalendarVisibility = (id: string) => {
-    // Production: await fetch(`/api/calendars/${id}/visibility`, { method: 'PATCH' })
     setCalendars((prev) =>
       prev.map((cal) => (cal.id === id ? { ...cal, visible: !cal.visible } : cal))
     );
   };
 
-  // ============================================================================
-  // AI SCHEDULE ACTIONS (PRODUCTION-READY)
-  // ============================================================================
-  // In production:
-  // - setAIGeneratedEvents: Result from POST /api/ai/generate-schedule
-  // - acceptAISchedule: POST /api/events/bulk (add all AI events)
-  // - clearAISchedule: Just clear local state
-  // ============================================================================
-
   const acceptAISchedule = () => {
-    // Production: await fetch('/api/events/bulk', { method: 'POST', body: JSON.stringify(aiGeneratedEvents) })
-    
-    // Add AI events to main calendar
-    setEvents((prev) => [...prev, ...aiGeneratedEvents]);
-    
-    // Optionally create a new calendar source for AI events
-    const hasAICalendar = calendars.some((cal) => cal.name.includes("AI Generated"));
+    const batch = aiGeneratedEvents.map((e) => ({
+      ...e,
+      id: ensureUuid(e.id),
+      isAIGenerated: true,
+    }));
+
+    setEvents((prev) => [...prev, ...batch]);
+
+    const hasAICalendar = calendars.some((cal) =>
+      cal.name.includes("AI Generated")
+    );
     if (!hasAICalendar) {
       const aiCalendar: CalendarSource = {
         id: `ai-cal-${Date.now()}`,
@@ -223,21 +307,22 @@ export function AppProvider({ children }: AppProviderProps) {
       };
       setCalendars((prev) => [...prev, aiCalendar]);
     }
-    
-    // Clear AI suggestions
+
     setAIGeneratedEvents([]);
+
+    if (!userId || batch.length === 0) return;
+    void insertCalendarEvents(batch, userId).catch((err) => {
+      console.error(err);
+      toast.error(
+        `Could not save AI schedule. ${formatErrorMessage(err)}`
+      );
+      void fetchCalendarEvents().then(setEvents).catch(console.error);
+    });
   };
 
   const clearAISchedule = () => {
     setAIGeneratedEvents([]);
   };
-
-  // ============================================================================
-  // COMPUTED DATA / FILTERS (PRODUCTION-READY)
-  // ============================================================================
-  // These functions compute derived state from the base state.
-  // They don't make API calls - just filter existing data.
-  // ============================================================================
 
   const getVisibleEvents = (): CalendarEvent[] => {
     const visibleCalendarIds = calendars
@@ -279,10 +364,6 @@ export function AppProvider({ children }: AppProviderProps) {
     });
   };
 
-  // ============================================================================
-  // CONTEXT VALUE
-  // ============================================================================
-
   const value: AppState = {
     // Data
     events,
@@ -319,10 +400,6 @@ export function AppProvider({ children }: AppProviderProps) {
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
-
-// ============================================================================
-// CUSTOM HOOK (PRODUCTION-READY)
-// ============================================================================
 
 export function useApp() {
   const context = useContext(AppContext);
