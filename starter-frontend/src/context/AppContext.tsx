@@ -30,6 +30,7 @@ import {
   updateTaskRow,
   deleteCalendarEvent,
   deleteTaskRow,
+  isPersistedEventId,
 } from "../lib/supabaseCalendarTask";
 import { formatErrorMessage } from "../lib/formatError";
 
@@ -195,6 +196,10 @@ export function AppProvider({ children }: AppProviderProps) {
       prev.map((event) => (event.id === id ? merged : event))
     );
     if (!userId) return;
+    if (!isPersistedEventId(id)) {
+      toast.error("Event is still saving. Wait a moment, then drag again.");
+      return;
+    }
     void updateCalendarEventRow(merged).catch((err) => {
       console.error(err);
       toast.error(`Could not update event. ${formatErrorMessage(err)}`);
@@ -324,18 +329,22 @@ export function AppProvider({ children }: AppProviderProps) {
     setAIGeneratedEvents([]);
   };
 
+  const resolveEventCalendarId = (event: CalendarEvent): string => {
+    if (event.calendarId) return event.calendarId;
+    const byColor = calendars.find(
+      (c) => c.color.toLowerCase() === event.color.toLowerCase()
+    );
+    return byColor?.id ?? calendars[0]?.id ?? "cal1";
+  };
+
   const getVisibleEvents = (): CalendarEvent[] => {
     const visibleCalendarIds = calendars
       .filter((cal) => cal.visible)
       .map((cal) => cal.id);
-    
-    return events.filter((event) => {
-      // If event has no calendarId, show it by default
-      if (!event.calendarId) return true;
-      
-      // Otherwise, only show if its calendar is visible
-      return visibleCalendarIds.includes(event.calendarId);
-    });
+
+    return events.filter((event) =>
+      visibleCalendarIds.includes(resolveEventCalendarId(event))
+    );
   };
 
   const getTasksByFilter = (filter: {
