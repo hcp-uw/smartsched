@@ -31,8 +31,16 @@ export async function generateResponse(prompt, context = {}) {
     The user's current schedule is provided in the context:
     Tasks: ${JSON.stringify(context.tasks || [])}
     Events: ${JSON.stringify(context.events || [])}
+    Schedule Preferences: ${JSON.stringify(context.schedulePreferences || {})}
 
     Your goal is to help the user manage and optimize their schedule. 
+    You may reference and explain the user's Schedule Preferences when they ask about routines, work hours, lunch, break preferences, available days, or why a schedule was generated a certain way.
+    Before proposing any action that changes, reschedules, completes, or deletes something, first verify it exists in the provided Tasks or Events context.
+    Never invent ids. For update_event and delete_event, use an id from Events. For update_task, use an id from Tasks.
+    If the user refers to an item that is not present, ambiguous, or only loosely matches existing items, ask a concise clarification question and do not include JSON actions.
+    If rescheduling an existing item, update that existing event id; do not create a replacement event unless the user explicitly asks to create a new event.
+    When building or revising a full schedule, do not create generic "Work Time" or "Personal Time" events. Use explicit scheduled tasks plus any needed "Morning Routine" and "Lunch Time" events.
+    If a task needs to be split across multiple calendar blocks, create separate calendar events for the chunks, but do not update the task duration in the to-do list.
     IMPORTANT: Only suggest "actions" (modifications) if:
     a) The user explicitly asks for suggestions or optimization.
     b) The user describes a specific change they want to make (e.g., "Move my meeting", "Mark task as done").

@@ -35,6 +35,13 @@ import {
   fetchUserCalendars,
   saveUserCalendars,
 } from "../lib/supabaseCalendars";
+import {
+  SchedulePreferences,
+  createDefaultDayPreferences,
+  loadLocalDayPreferences,
+  normalizeDayPreferences,
+  saveLocalDayPreferences,
+} from "../lib/schedulePreferences";
 
 interface AppState {
   // Data State
@@ -42,6 +49,7 @@ interface AppState {
   tasks: Task[];
   calendars: CalendarSource[];
   deadlines: Deadline[];
+  schedulePreferences: SchedulePreferences;
   
   // AI State
   aiGeneratedEvents: CalendarEvent[];
@@ -64,8 +72,9 @@ interface AppState {
   
   // Actions - AI
   setAIGeneratedEvents: (events: CalendarEvent[]) => void;
-  acceptAISchedule: () => void;
+  acceptAISchedule: () => Promise<void>;
   clearAISchedule: () => void;
+  saveSchedulePreferences: (preferences: SchedulePreferences) => Promise<void>;
   
   // Computed/Filtered Data
   getVisibleEvents: () => CalendarEvent[];
@@ -90,6 +99,9 @@ export function AppProvider({ children }: AppProviderProps) {
   const [calendarsHydrated, setCalendarsHydrated] = useState(false);
   const [deadlines] = useState<Deadline[]>([]);
   const [aiGeneratedEvents, setAIGeneratedEvents] = useState<CalendarEvent[]>([]);
+  const [schedulePreferences, setSchedulePreferences] = useState<SchedulePreferences>(
+    createDefaultDayPreferences
+  );
 
   const tasksRef = useRef<Task[]>([]);
   const eventsRef = useRef<CalendarEvent[]>([]);
@@ -114,6 +126,7 @@ export function AppProvider({ children }: AppProviderProps) {
       setCalendarsHydrated(false);
       setEvents([]);
       setTasks([]);
+      setSchedulePreferences(createDefaultDayPreferences());
       return;
     }
     let cancelled = false;
@@ -133,6 +146,36 @@ export function AppProvider({ children }: AppProviderProps) {
           toast.error(
             `Could not load events or tasks. ${formatErrorMessage(err)}`
           );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("schedule_preferences")
+          .eq("id", userId)
+          .maybeSingle();
+        if (error) throw error;
+
+        const loaded =
+          normalizeDayPreferences(data?.schedule_preferences) ||
+          loadLocalDayPreferences(userId) ||
+          createDefaultDayPreferences();
+
+        if (!cancelled) setSchedulePreferences(loaded);
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setSchedulePreferences(loadLocalDayPreferences(userId) || createDefaultDayPreferences());
         }
       }
     })();
@@ -338,14 +381,17 @@ export function AppProvider({ children }: AppProviderProps) {
     );
   };
 
-  const acceptAISchedule = () => {
+  const acceptAISchedule = async () => {
     const batch = aiGeneratedEvents.map((e) => ({
       ...e,
       id: ensureUuid(e.id),
       isAIGenerated: true,
     }));
 
-    setEvents((prev) => [...prev, ...batch]);
+    if (batch.length === 0) {
+      setAIGeneratedEvents([]);
+      return;
+    }
 
     const hasAICalendar = calendars.some((cal) =>
       cal.name.includes("AI Generated")
@@ -362,18 +408,41 @@ export function AppProvider({ children }: AppProviderProps) {
 
     setAIGeneratedEvents([]);
 
-    if (!userId || batch.length === 0) return;
-    void insertCalendarEvents(batch, userId).catch((err) => {
+    if (!userId) {
+      setEvents((prev) => [...prev, ...batch]);
+      return;
+    }
+
+    try {
+      const saved = await insertCalendarEvents(batch, userId);
+      setEvents((prev) => [...prev, ...saved]);
+    } catch (err) {
       console.error(err);
       toast.error(
         `Could not save AI schedule. ${formatErrorMessage(err)}`
       );
+      setAIGeneratedEvents(batch);
       void fetchCalendarEvents().then(setEvents).catch(console.error);
-    });
+      throw err;
+    }
   };
 
   const clearAISchedule = () => {
     setAIGeneratedEvents([]);
+  };
+
+  const saveSchedulePreferences = async (preferences: SchedulePreferences) => {
+    setSchedulePreferences(preferences);
+
+    if (!userId) return;
+    saveLocalDayPreferences(userId, preferences);
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ schedule_preferences: preferences })
+      .eq("id", userId);
+
+    if (error) throw error;
   };
 
   const resolveEventCalendarId = (event: CalendarEvent): string => {
@@ -426,6 +495,7 @@ export function AppProvider({ children }: AppProviderProps) {
     tasks,
     calendars,
     deadlines,
+    schedulePreferences,
     aiGeneratedEvents,
     
     // Event Actions
@@ -448,6 +518,7 @@ export function AppProvider({ children }: AppProviderProps) {
     setAIGeneratedEvents,
     acceptAISchedule,
     clearAISchedule,
+    saveSchedulePreferences,
     
     // Computed
     getVisibleEvents,

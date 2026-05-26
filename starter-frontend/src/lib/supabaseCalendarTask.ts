@@ -399,9 +399,11 @@ export async function insertCalendarEvents(
   events: CalendarEvent[],
   userId: string
 ) {
+  const savedEvents: CalendarEvent[] = [];
   for (const event of events) {
-    await insertCalendarEvent(event, userId);
+    savedEvents.push(await insertCalendarEvent(event, userId));
   }
+  return savedEvents;
 }
 
 export async function updateCalendarEventRow(merged: CalendarEvent) {

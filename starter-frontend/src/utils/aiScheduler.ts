@@ -10,6 +10,10 @@
 
 import { CalendarEvent, Task, CalendarSource } from "../data/mockData";
 import { startOfDay, addMinutes, isWithinInterval, addDays } from "date-fns";
+import {
+  SchedulePreferences,
+  dayIndexToDayName,
+} from "../lib/schedulePreferences";
 
 /**
  * Placholder function
@@ -28,6 +32,10 @@ export interface AIScheduleRequest {
     workDays?: number[]; // [1, 2, 3, 4, 5] for Mon-Fri
     busySlots?: { start: Date; end: Date }[];
     freeSlots?: { start: Date; end: Date }[];
+    schedulePreferences?: SchedulePreferences;
+    startDate?: Date;
+    daysAhead?: number;
+    includeRoutineEvents?: boolean;
   };
 }
 
@@ -56,6 +64,12 @@ export function generateAISchedule(request: AIScheduleRequest): CalendarEvent[] 
   const workDays = preferences.workDays;
   const busySlots = preferences.busySlots || [];
   const freeSlots = preferences.freeSlots || [];
+  const schedulePreferences = preferences.schedulePreferences;
+  const planStartDate = preferences.startDate ?? new Date();
+  const daysAhead = Math.max(1, Math.min(preferences.daysAhead ?? 7, 31));
+  const regularBreakMinutes = schedulePreferences
+    ? 10
+    : preferences.breakDuration ?? 0;
 
   // Get unscheduled tasks (incomplete, with duration)
   const unscheduledTasks = tasks.filter(
@@ -70,16 +84,31 @@ export function generateAISchedule(request: AIScheduleRequest): CalendarEvent[] 
     existingEvents,
     workStart,
     workEnd,
-    7, // Look ahead 7 days
+    daysAhead,
     workDays,
     busySlots,
-    freeSlots
+    freeSlots,
+    schedulePreferences,
+    planStartDate
   );
 
   // Schedule tasks into available slots
-  const scheduledEvents = scheduleTasksIntoSlots(sortedTasks, availableSlots, maxTasksPerDay);
+  const scheduledEvents = scheduleTasksIntoSlots(
+    sortedTasks,
+    availableSlots,
+    maxTasksPerDay,
+    regularBreakMinutes,
+    schedulePreferences
+  );
 
-  return scheduledEvents;
+  if (!preferences.includeRoutineEvents || !schedulePreferences) {
+    return scheduledEvents;
+  }
+
+  return [
+    ...generateRoutineEvents(schedulePreferences, planStartDate, daysAhead),
+    ...scheduledEvents,
+  ];
 }
 
 /**
@@ -118,14 +147,21 @@ function findAvailableTimeSlots(
   daysAhead: number,
   workDays?: number[],
   busySlots: { start: Date; end: Date }[] = [],
-  freeSlots: { start: Date; end: Date }[] = []
+  freeSlots: { start: Date; end: Date }[] = [],
+  schedulePreferences?: SchedulePreferences,
+  startDate: Date = new Date()
 ): TimeSlot[] {
   const slots: TimeSlot[] = [];
-  const today = startOfDay(new Date());
+  const today = startOfDay(startDate);
 
   for (let dayOffset = 0; dayOffset < daysAhead; dayOffset++) {
     const currentDay = addDays(today, dayOffset);
     const dayOfWeek = currentDay.getDay();
+    const dayPreference = schedulePreferences?.[dayIndexToDayName(dayOfWeek)];
+
+    if (dayPreference && !dayPreference.enabled) {
+      continue;
+    }
 
     // Check if it's a work day (if workDays provided)
     if (workDays && workDays.length > 0 && !workDays.includes(dayOfWeek)) {
@@ -134,15 +170,30 @@ function findAvailableTimeSlots(
     
     // Create work day boundaries
     const dayStart = new Date(currentDay);
-    applyDecimalHour(dayStart, workStart);
+    applyDecimalHour(dayStart, dayPreference?.workStart ?? workStart);
     
     const dayEnd = new Date(currentDay);
-    applyDecimalHour(dayEnd, workEnd);
+    applyDecimalHour(dayEnd, dayPreference?.workEnd ?? workEnd);
+
+    const preferenceBusySlots: { start: Date; end: Date }[] = [];
+    if (
+      dayPreference &&
+      dayPreference.lunchStart < dayPreference.lunchEnd &&
+      dayPreference.lunchStart < dayPreference.workEnd &&
+      dayPreference.lunchEnd > dayPreference.workStart
+    ) {
+      const lunchStart = new Date(currentDay);
+      applyDecimalHour(lunchStart, Math.max(dayPreference.lunchStart, dayPreference.workStart));
+      const lunchEnd = new Date(currentDay);
+      applyDecimalHour(lunchEnd, Math.min(dayPreference.lunchEnd, dayPreference.workEnd));
+      preferenceBusySlots.push({ start: lunchStart, end: lunchEnd });
+    }
 
     // Combine existing events with custom busy slots
     const allBusySlots = [
       ...existingEvents.map(e => ({ start: e.start, end: e.end })),
-      ...busySlots
+      ...busySlots,
+      ...preferenceBusySlots,
     ];
 
     // Get busy slots for this day
@@ -218,63 +269,148 @@ function findAvailableTimeSlots(
 function scheduleTasksIntoSlots(
   tasks: Task[],
   slots: TimeSlot[],
-  maxTasksPerDay: number
+  maxTasksPerDay: number,
+  regularBreakMinutes = 0,
+  schedulePreferences?: SchedulePreferences
 ): CalendarEvent[] {
   const scheduledEvents: CalendarEvent[] = [];
   const tasksPerDay = new Map<string, number>();
+  const remainingSlots = [...slots].sort((a, b) => a.start.getTime() - b.start.getTime());
 
   for (const task of tasks) {
-    // Find a suitable slot for this task
-    const suitableSlot = slots.find((slot) => {
-      const slotDay = slot.start.toDateString();
-      const tasksOnDay = tasksPerDay.get(slotDay) ?? 0;
-      const taskDuration = task.duration > 0 ? task.duration : 30;
-      
-      return (
-        slot.duration >= taskDuration &&
-        tasksOnDay < maxTasksPerDay &&
-        !isSlotUsed(slot, scheduledEvents)
-      );
-    });
+    let remainingTaskMinutes = task.duration > 0 ? task.duration : 30;
+    const taskEvents: CalendarEvent[] = [];
 
-    if (suitableSlot) {
-      // If task has no duration, assume 30 mins
-      const taskDuration = task.duration > 0 ? task.duration : 30;
+    while (remainingTaskMinutes > 0) {
+      const minimumChunkMinutes = Math.min(15, remainingTaskMinutes);
+      const slotIndex = remainingSlots.findIndex((slot) => {
+        const slotDay = slot.start.toDateString();
+        const tasksOnDay = tasksPerDay.get(slotDay) ?? 0;
+
+        return (
+          slot.duration >= minimumChunkMinutes &&
+          tasksOnDay < maxTasksPerDay
+        );
+      });
+
+      if (slotIndex < 0) break;
+
+      const suitableSlot = remainingSlots[slotIndex];
+      const chunkDuration = Math.min(remainingTaskMinutes, suitableSlot.duration);
+      const eventStart = new Date(suitableSlot.start);
+      const eventEnd = addMinutes(eventStart, chunkDuration);
       
-      // Create event from task
       const event: CalendarEvent = {
-        id: `ai-${task.id}-${Date.now()}`,
+        id: `ai-${task.id}-${eventStart.getTime()}-${taskEvents.length}`,
         title: task.title,
-        start: new Date(suitableSlot.start),
-        end: addMinutes(suitableSlot.start, taskDuration),
+        start: eventStart,
+        end: eventEnd,
         category: task.category,
         color: getCategoryColor(task.category),
         isAIGenerated: true,
       };
 
-      scheduledEvents.push(event);
+      taskEvents.push(event);
 
-      // Track tasks per day
       const eventDay = event.start.toDateString();
       tasksPerDay.set(eventDay, (tasksPerDay.get(eventDay) ?? 0) + 1);
+      remainingTaskMinutes -= chunkDuration;
+
+      const dayPreference = schedulePreferences?.[dayIndexToDayName(event.start.getDay())];
+      const breakMinutes = dayPreference?.breakPreference === false ? 0 : regularBreakMinutes;
+      const nextSlotStart = addMinutes(eventEnd, breakMinutes);
+      if (nextSlotStart < suitableSlot.end) {
+        remainingSlots[slotIndex] = {
+          start: nextSlotStart,
+          end: suitableSlot.end,
+          duration: (suitableSlot.end.getTime() - nextSlotStart.getTime()) / (1000 * 60),
+        };
+      } else {
+        remainingSlots.splice(slotIndex, 1);
+      }
     }
+
+    scheduledEvents.push(
+      ...taskEvents.map((event, index) => ({
+        ...event,
+        title:
+          taskEvents.length > 1
+            ? `${task.title} (Part ${index + 1})`
+            : task.title,
+      }))
+    );
   }
 
   return scheduledEvents;
 }
 
-/**
- * Helper: Check if a time slot overlaps with any scheduled events
- */
-function isSlotUsed(slot: TimeSlot, events: CalendarEvent[]): boolean {
-  return events.some((event) => {
-    const eventInterval = { start: event.start, end: event.end };
-    return (
-      isWithinInterval(slot.start, eventInterval) ||
-      isWithinInterval(slot.end, eventInterval) ||
-      (slot.start <= event.start && slot.end >= event.end)
-    );
-  });
+function createEventForHours(
+  idPrefix: string,
+  title: string,
+  date: Date,
+  startHour: number,
+  endHour: number,
+  category: CalendarEvent["category"],
+  color: string
+): CalendarEvent | null {
+  if (endHour <= startHour) return null;
+
+  const start = new Date(date);
+  applyDecimalHour(start, startHour);
+  const end = new Date(date);
+  applyDecimalHour(end, endHour);
+
+  return {
+    id: `ai-routine-${idPrefix}-${date.toISOString()}-${startHour}-${endHour}`,
+    title,
+    start,
+    end,
+    category,
+    color,
+    isAIGenerated: true,
+  };
+}
+
+function generateRoutineEvents(
+  preferences: SchedulePreferences,
+  startDate: Date,
+  daysAhead: number
+): CalendarEvent[] {
+  const events: CalendarEvent[] = [];
+  const firstDay = startOfDay(startDate);
+
+  for (let offset = 0; offset < daysAhead; offset++) {
+    const day = addDays(firstDay, offset);
+    const dayPreference = preferences[dayIndexToDayName(day.getDay())];
+    if (!dayPreference?.enabled) continue;
+
+    const routineEvents = [
+      createEventForHours(
+        "morning",
+        "Morning Routine",
+        day,
+        dayPreference.wakeTime,
+        dayPreference.workStart,
+        "personal",
+        "#8B5CF6"
+      ),
+      createEventForHours(
+        "lunch",
+        "Lunch Time",
+        day,
+        Math.max(dayPreference.lunchStart, dayPreference.workStart),
+        Math.min(dayPreference.lunchEnd, dayPreference.workEnd),
+        "break",
+        "#F59E0B"
+      ),
+    ];
+
+    for (const event of routineEvents) {
+      if (event) events.push(event);
+    }
+  }
+
+  return events;
 }
 
 /**
