@@ -130,7 +130,9 @@ export function Profile() {
         setForm({
           display_name: profileData?.display_name || "",
           email: user.email || "",
-          timezone: profileData?.timezone || "",
+          timezone:
+            profileData?.timezone ||
+            Intl.DateTimeFormat().resolvedOptions().timeZone,
         });
 
         const savedPreferences =
@@ -146,16 +148,27 @@ export function Profile() {
     load();
   }, []);
 
-  const currentDayPref = dayPreferences[selectedDay];
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <p className="text-muted-foreground">Loading profile...</p>
+      </div>
+    );
+  }
+  //const currentDayPref = dayPreferences[selectedDay];
 
-  const updateDayPreference = (key: keyof DayPreferences, value: any) => {
-    setDayPreferences({
-      ...dayPreferences,
-      [selectedDay]: {
-        ...currentDayPref,
+  const updateDayPreference = (
+    day: string,
+    key: keyof DayPreferences,
+    value: any
+  ) => {
+    setDayPreferences((prev) => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
         [key]: value,
       },
-    });
+    }));
   };
 
   const handleSaveChanges = async () => {
@@ -204,8 +217,8 @@ export function Profile() {
     return `${hour - 12} PM`;
   };
 
-  const getTimeBlocks = () => {
-    const blocks = [];
+  const getTimeBlocks = (currentDayPref: DayPreferences) => {
+      const blocks = [];
 
     // Wake to Work Start
     if (currentDayPref.wakeTime < currentDayPref.workStart) {
@@ -263,7 +276,7 @@ export function Profile() {
     return blocks;
   };
 
-  const timeBlocks = getTimeBlocks();
+  //const timeBlocks = getTimeBlocks();
 
   return (
     <div className="h-screen overflow-y-auto">
@@ -336,11 +349,10 @@ export function Profile() {
                   <Input
                     id="timezone"
                     value={form.timezone}
-                    onChange={(e) =>
-                      setForm({ ...form, timezone: e.target.value })
-                    }
+                    disabled
                     className="mt-2 bg-input-background"
                   />
+
                 </div>
 
                 <Button
@@ -390,8 +402,11 @@ export function Profile() {
                   ))}
                 </TabsList>
 
-                {daysOfWeek.map((day) => (
-                  <TabsContent key={day} value={day} className="space-y-6">
+                {daysOfWeek.map((day) => {
+                  const currentDayPref = dayPreferences[day];
+                  const timeBlocks = getTimeBlocks(currentDayPref);
+                    return (
+                      <TabsContent key={day} value={day} className="space-y-6">
                     {/* Day Enable/Disable */}
                     <div className="flex items-center justify-between p-4 rounded-xl bg-accent/50">
                       <div className="flex items-center gap-3">
@@ -405,7 +420,7 @@ export function Profile() {
                       </div>
                       <Switch
                         checked={currentDayPref.enabled}
-                        onCheckedChange={(checked) => updateDayPreference("enabled", checked)}
+                        onCheckedChange={(checked) => updateDayPreference(day,"enabled", checked)}
                       />
                     </div>
 
@@ -459,7 +474,7 @@ export function Profile() {
                             </div>
                             <Slider
                               value={[currentDayPref.wakeTime]}
-                              onValueChange={([value]) => updateDayPreference("wakeTime", value)}
+                              onValueChange={([value]) => updateDayPreference(day,"wakeTime", value)}
                               min={0}
                               max={23}
                               step={1}
@@ -481,9 +496,9 @@ export function Profile() {
                                 </div>
                                 <Slider
                                   value={[currentDayPref.workStart]}
-                                  onValueChange={([value]) => updateDayPreference("workStart", value)}
+                                  onValueChange={([value]) => updateDayPreference(day,"workStart", value)}
                                   min={0}
-                                  max={23}
+                                  max={currentDayPref.workEnd - 1}
                                   step={1}
                                 />
                               </div>
@@ -494,8 +509,8 @@ export function Profile() {
                                 </div>
                                 <Slider
                                   value={[currentDayPref.workEnd]}
-                                  onValueChange={([value]) => updateDayPreference("workEnd", value)}
-                                  min={0}
+                                  onValueChange={([value]) => updateDayPreference(day,"workEnd", value)}
+                                  min={currentDayPref.workStart + 1}
                                   max={23}
                                   step={1}
                                 />
@@ -517,9 +532,9 @@ export function Profile() {
                                 </div>
                                 <Slider
                                   value={[currentDayPref.lunchStart]}
-                                  onValueChange={([value]) => updateDayPreference("lunchStart", value)}
+                                  onValueChange={([value]) => updateDayPreference(day,"lunchStart", value)}
                                   min={0}
-                                  max={23}
+                                  max={currentDayPref.lunchEnd - 0.5}
                                   step={0.5}
                                 />
                               </div>
@@ -530,8 +545,8 @@ export function Profile() {
                                 </div>
                                 <Slider
                                   value={[currentDayPref.lunchEnd]}
-                                  onValueChange={([value]) => updateDayPreference("lunchEnd", value)}
-                                  min={0}
+                                  onValueChange={([value]) => updateDayPreference(day,"lunchEnd", value)}
+                                  min={currentDayPref.lunchStart + 0.5}
                                   max={23}
                                   step={0.5}
                                 />
@@ -550,7 +565,7 @@ export function Profile() {
                             </div>
                             <Slider
                               value={[currentDayPref.sleepTime]}
-                              onValueChange={([value]) => updateDayPreference("sleepTime", value)}
+                              onValueChange={([value]) => updateDayPreference(day,"sleepTime", value)}
                               min={0}
                               max={23}
                               step={1}
@@ -570,14 +585,15 @@ export function Profile() {
                             </div>
                             <Switch
                               checked={currentDayPref.breakPreference}
-                              onCheckedChange={(checked) => updateDayPreference("breakPreference", checked)}
+                              onCheckedChange={(checked) => updateDayPreference(day,"breakPreference", checked)}
                             />
                           </div>
                         </div>
                       </>
                     )}
                   </TabsContent>
-                ))}
+                    );
+                  })}
               </Tabs>
 
               <div className="mt-6 pt-6 border-t border-border">
