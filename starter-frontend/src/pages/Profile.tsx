@@ -10,6 +10,7 @@ import { supabase } from "../supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { getOrCreateProfile } from "../lib/profile";
+import { toast } from "sonner";
 
 const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -36,6 +37,52 @@ const defaultPreferences: DayPreferences = {
   breakPreference: true,
 };
 
+const createDefaultDayPreferences = () =>
+  Object.fromEntries(daysOfWeek.map((day) => [day, { ...defaultPreferences }])) as Record<
+    string,
+    DayPreferences
+  >;
+
+const getPreferenceStorageKey = (userId: string) => `schedule-preferences:${userId}`;
+
+const isDayPreference = (value: unknown): value is DayPreferences => {
+  if (!value || typeof value !== "object") return false;
+  const pref = value as Record<string, unknown>;
+  return (
+    typeof pref.enabled === "boolean" &&
+    typeof pref.wakeTime === "number" &&
+    typeof pref.sleepTime === "number" &&
+    typeof pref.workStart === "number" &&
+    typeof pref.workEnd === "number" &&
+    typeof pref.lunchStart === "number" &&
+    typeof pref.lunchEnd === "number" &&
+    typeof pref.breakPreference === "boolean"
+  );
+};
+
+const normalizeDayPreferences = (saved: unknown): Record<string, DayPreferences> | null => {
+  if (!saved || typeof saved !== "object") return null;
+  const savedPrefs = saved as Record<string, unknown>;
+  return Object.fromEntries(
+    daysOfWeek.map((day) => [
+      day,
+      isDayPreference(savedPrefs[day])
+        ? { ...defaultPreferences, ...savedPrefs[day] }
+        : { ...defaultPreferences },
+    ])
+  ) as Record<string, DayPreferences>;
+};
+
+const loadLocalDayPreferences = (userId: string) => {
+  try {
+    const saved = window.localStorage.getItem(getPreferenceStorageKey(userId));
+    return saved ? normalizeDayPreferences(JSON.parse(saved)) : null;
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+};
+
 export function Profile() {
   //logout handling
   const navigate = useNavigate();
@@ -47,7 +94,7 @@ export function Profile() {
 
   const [selectedDay, setSelectedDay] = useState("Monday");
   const [dayPreferences, setDayPreferences] = useState<Record<string, DayPreferences>>(
-    Object.fromEntries(daysOfWeek.map((day) => [day, { ...defaultPreferences }]))
+    createDefaultDayPreferences
   );
 
   //profile states
@@ -59,6 +106,7 @@ export function Profile() {
     email: "",
     timezone: "",
   });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -82,8 +130,15 @@ export function Profile() {
         setForm({
           display_name: profileData?.display_name || "",
           email: user.email || "",
-          timezone: "",
+          timezone: profileData?.timezone || "",
         });
+
+        const savedPreferences =
+          normalizeDayPreferences(profileData?.schedule_preferences) ||
+          loadLocalDayPreferences(user.id);
+        if (savedPreferences) {
+          setDayPreferences(savedPreferences);
+        }
 
         setLoading(false);
     };
@@ -101,6 +156,45 @@ export function Profile() {
         [key]: value,
       },
     });
+  };
+
+  const handleSaveChanges = async () => {
+    if (!profile?.id) return;
+
+    setSaving(true);
+    window.localStorage.setItem(
+      getPreferenceStorageKey(profile.id),
+      JSON.stringify(dayPreferences)
+    );
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({
+        display_name: form.display_name,
+        timezone: form.timezone,
+        schedule_preferences: dayPreferences,
+      })
+      .eq("id", profile.id);
+
+    setSaving(false);
+
+    if (error) {
+      console.error(error);
+      await supabase
+        .from("profiles")
+        .update({
+          display_name: form.display_name,
+        })
+        .eq("id", profile.id);
+      toast.error(
+        "Saved locally, but Supabase needs the schedule_preferences migration before cloud sync works."
+      );
+      return;
+    }
+
+    const updated = await getOrCreateProfile(profile);
+    setProfile(updated);
+    toast.success("Profile preferences saved.");
   };
 
   const formatHour = (hour: number) => {
@@ -251,21 +345,10 @@ export function Profile() {
 
                 <Button
                   className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
-                  onClick={async () => {
-                    if (!profile?.id) return;
-
-                    await supabase
-                      .from("profiles")
-                      .update({
-                        display_name: form.display_name,
-                      })
-                      .eq("id", profile.id);
-
-                    const updated = await getOrCreateProfile(profile);
-                    setProfile(updated);
-                  }}
+                  onClick={handleSaveChanges}
+                  disabled={saving}
                 >
-                  Save Changes
+                  {saving ? "Saving..." : "Save Changes"}
                 </Button>
 
                 <Button
@@ -498,8 +581,12 @@ export function Profile() {
               </Tabs>
 
               <div className="mt-6 pt-6 border-t border-border">
-                <Button className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90">
-                  Save Preferences
+                <Button
+                  className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
+                  onClick={handleSaveChanges}
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save Preferences"}
                 </Button>
               </div>
             </div>
