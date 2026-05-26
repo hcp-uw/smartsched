@@ -344,7 +344,7 @@ export function Profile() {
                     className="mt-2 bg-input-background"
                   />
                 </div>
-                <div>
+                {/* <div>
                   <Label htmlFor="timezone" className="text-sm">Timezone</Label>
                   <Input
                     id="timezone"
