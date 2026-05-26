@@ -53,9 +53,19 @@ export function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [timeScale, setTimeScale] = useState<TimeScale>("comfortable");
-  const [showAIPanel, setShowAIPanel] = useState(false);
+  //const [showAIPanel, setShowAIPanel] = useState(false);
+  const [uiMode, setUiMode] = useState<"normal" | "ai-preview">("normal");
   const [showAISuggestions, setShowAISuggestions] = useState(false);
-  
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+
+  useEffect(() => {
+  if (uiMode === "ai-preview") {
+    setLeftCollapsed(true);
+  } else {
+    setLeftCollapsed(false);
+  }
+}, [uiMode]);
+
   // Modal states
   const [eventModalOpen, setEventModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -141,7 +151,7 @@ export function Calendar() {
 
     // Update state through context
     setAIGeneratedEvents(aiSchedule);
-    setShowAIPanel(true);
+    setUiMode("ai-preview");
     setShowAISuggestions(true);
     toast.success("AI schedule generated!");
   };
@@ -149,7 +159,8 @@ export function Calendar() {
   const handleAcceptAIPlan = () => {
     acceptAISchedule();
     setShowAISuggestions(false);
-    setShowAIPanel(false);
+    setUiMode("normal");
+    setShowAISuggestions(false);
     toast.success("AI schedule added to your calendar!");
   };
 
@@ -263,9 +274,13 @@ export function Calendar() {
     //TODO MUST FIX XANDER
 
 
-    <div className="flex h-screen overflow-hidden">
+<div className="flex h-screen w-full overflow-hidden">
       {/* Left Panel - Calendar Controls */}
-      <div className="w-80 bg-card border-r border-border flex flex-col">
+      <div
+        className={`bg-card border-r border-border flex flex-col overflow-hidden transition-all duration-300 ${
+          leftCollapsed ? "w-0 opacity-0 pointer-events-none" : "w-80 opacity-100"
+        }`}
+      >
         {/* HEADER - Fixed */}
         <div className="p-6 border-b border-border flex-shrink-0">
           <Button
@@ -376,7 +391,9 @@ export function Calendar() {
       </div>
 
       {/* Center Panel - Calendar View */}
-      <div className="flex-1 flex flex-col min-w-0">
+      
+        <div className="flex flex-col flex-1 min-w-0 transition-all duration-300">
+      
         {/* Calendar Header */}
         <div className="p-6 border-b border-border flex-shrink-0">
           <div className="flex items-center justify-between mb-4">
@@ -704,84 +721,107 @@ export function Calendar() {
       </div>
 
       {/* Right Panel - AI Suggestions */}
-      <AnimatePresence>
-        {showAIPanel && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 384, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="bg-card border-l border-border overflow-hidden flex-shrink-0"
+  {/* AI Plan Panel (layout-based, NOT overlay) */}
+{/* AI Plan Panel */}
+<AnimatePresence>
+  {uiMode === "ai-preview" && (
+    <motion.div
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: 384, opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ type: "spring", stiffness: 260, damping: 28 }}
+      className="h-full bg-card border-l border-border flex-shrink-0 overflow-hidden shadow-2xl"
+    >
+    <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-border to-transparent opacity-60" />
+      <div className="p-6 h-full flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold">AI Plan</h2>
+            <p className="text-xs text-muted-foreground">
+              Generated schedule preview
+            </p>
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setUiMode("normal");
+              setShowAISuggestions(false);
+              clearAISchedule();
+            }}
           >
-            <div className="p-6 h-full flex flex-col">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-semibold">AI Plan</h2>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowAIPanel(false)}
-                >
-                  Close
-                </Button>
+            Close
+          </Button>
+        </div>
+
+        {/* Content */}
+        {showAISuggestions ? (
+          <div className="space-y-6 flex-1 overflow-y-auto">
+
+            <div className="p-4 rounded-xl bg-gradient-to-br from-[#5B8DEF]/10 to-[#8B5CF6]/10 border border-[#5B8DEF]/20">
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles className="w-4 h-4 text-[#5B8DEF]" />
+                <span className="text-sm font-medium">
+                  AI Generated Schedule
+                </span>
               </div>
 
-              {showAISuggestions ? (
-                <div className="space-y-6 flex-1 overflow-y-auto">
-                  <div className="p-4 rounded-xl bg-gradient-to-br from-[#5B8DEF]/10 to-[#8B5CF6]/10 border border-[#5B8DEF]/20">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Sparkles className="w-4 h-4 text-[#5B8DEF]" />
-                      <span className="text-sm font-medium">AI Generated Schedule</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      I've scheduled your pending tasks in your free time slots while respecting your preferences.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold">Scheduled Tasks</h3>
-                    {aiGeneratedEvents.map((event) => (
-                      <div
-                        key={event.id}
-                        className="p-4 rounded-xl bg-accent/50 border border-border"
-                      >
-                        <h4 className="font-medium mb-1">{event.title}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          {format(event.start, "EEE, MMM d • h:mm a")} - {format(event.end, "h:mm a")}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-3 mt-auto pt-6">
-                    <Button
-                      onClick={handleAcceptAIPlan}
-                      className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
-                    >
-                      Accept Plan
-                    </Button>
-                    <Button
-                      onClick={handleRegenerateAIPlan}
-                      variant="outline"
-                      className="w-full"
-                    >
-                      Regenerate
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center py-8">
-                    <CalendarIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-                    <p className="text-muted-foreground">
-                      AI suggestions will appear here
-                    </p>
-                  </div>
-                </div>
-              )}
+              <p className="text-sm text-muted-foreground">
+                I've scheduled your pending tasks in your free time slots while respecting your preferences.
+              </p>
             </div>
-          </motion.div>
+
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold">Scheduled Tasks</h3>
+
+              {aiGeneratedEvents.map((event) => (
+                <div
+                  key={event.id}
+                  className="p-4 rounded-xl bg-accent/50 border border-border"
+                >
+                  <h4 className="font-medium mb-1">{event.title}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    {format(event.start, "EEE, MMM d • h:mm a")} -{" "}
+                    {format(event.end, "h:mm a")}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-3 mt-auto pt-6">
+              <Button
+                onClick={handleAcceptAIPlan}
+                className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
+              >
+                Accept Plan
+              </Button>
+
+              <Button
+                onClick={handleRegenerateAIPlan}
+                variant="outline"
+                className="w-full"
+              >
+                Regenerate
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center py-8">
+              <CalendarIcon className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-50" />
+              <p className="text-muted-foreground">
+                AI suggestions will appear here
+              </p>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
+      </div>
+    </motion.div>
+  )}
+</AnimatePresence>
 
       {/* Modals */}
       <EventModal
