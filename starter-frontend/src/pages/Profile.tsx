@@ -237,7 +237,7 @@ export function Profile() {
                     className="mt-2 bg-input-background"
                   />
                 </div>
-                <div>
+                {/* <div>
                   <Label htmlFor="timezone" className="text-sm">Timezone</Label>
                   <Input
                     id="timezone"
@@ -247,7 +247,7 @@ export function Profile() {
                     }
                     className="mt-2 bg-input-background"
                   />
-                </div>
+                </div> */}
 
                 <Button
                   className="w-full bg-gradient-to-r from-[#5B8DEF] to-[#8B5CF6] hover:opacity-90"
