@@ -36,6 +36,7 @@ export interface Task {
   duration: number; // in minutes (also known as estimatedDuration)
   dueDate: Date | null;
   category: "work" | "personal" | "meeting" | "focus" | "break";
+  notes?: string;
 }
 
 export interface CalendarSource {

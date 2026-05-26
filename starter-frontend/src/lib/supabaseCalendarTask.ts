@@ -156,6 +156,19 @@ function intToTaskPriority(n: number): Task["priority"] {
   return "high";
 }
 
+function toTaskCategory(category: string | null | undefined): Task["category"] {
+  if (
+    category === "work" ||
+    category === "personal" ||
+    category === "meeting" ||
+    category === "focus" ||
+    category === "break"
+  ) {
+    return category;
+  }
+  return "work";
+}
+
 type EventsRow = {
   id: number;
   user_id: string;
@@ -214,7 +227,71 @@ type TasksRow = {
   priority: number | null;
   status: string | null;
   color: number;
+  duration_minutes?: number | null;
+  tags?: string[] | null;
+  category?: Task["category"] | null;
+  notes?: string | null;
 };
+
+type LocalTaskDetails = Pick<Task, "duration" | "tags" | "category" | "notes">;
+
+function getTaskDetailsStorageKey(userId: string): string {
+  return `smartsched:task-details:${userId}`;
+}
+
+async function getCurrentUserId(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user?.id ?? null;
+}
+
+function readLocalTaskDetails(userId: string | null): Record<string, LocalTaskDetails> {
+  if (!userId || typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(getTaskDetailsStorageKey(userId));
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveLocalTaskDetails(task: Task, userId?: string | null) {
+  const resolvedUserId = userId ?? (await getCurrentUserId());
+  if (!resolvedUserId || typeof window === "undefined") return;
+
+  const details = readLocalTaskDetails(resolvedUserId);
+  details[task.id] = {
+    duration: Math.max(1, Math.round(task.duration || 30)),
+    tags: task.tags,
+    category: task.category,
+    notes: task.notes ?? "",
+  };
+  window.localStorage.setItem(
+    getTaskDetailsStorageKey(resolvedUserId),
+    JSON.stringify(details)
+  );
+}
+
+async function deleteLocalTaskDetails(id: string) {
+  const userId = await getCurrentUserId();
+  if (!userId || typeof window === "undefined") return;
+  const details = readLocalTaskDetails(userId);
+  delete details[id];
+  window.localStorage.setItem(
+    getTaskDetailsStorageKey(userId),
+    JSON.stringify(details)
+  );
+}
+
+function mergeLocalTaskDetails(
+  tasks: Task[],
+  details: Record<string, LocalTaskDetails>
+): Task[] {
+  return tasks.map((task) => {
+    const local = details[task.id];
+    return local ? { ...task, ...local } : task;
+  });
+}
 
 async function nextEventsTableId(): Promise<number> {
   const { data, error } = await supabase
@@ -434,59 +511,239 @@ export function taskFromRow(row: TasksRow): Task {
     title: row.task_name,
     completed,
     priority: intToTaskPriority(row.priority ?? 0),
-    tags: [],
-    duration: 30,
+    tags: Array.isArray(row.tags) ? row.tags.filter(Boolean) : [],
+    duration:
+      typeof row.duration_minutes === "number" && row.duration_minutes > 0
+        ? row.duration_minutes
+        : 30,
     dueDate: row.due_date ? new Date(row.due_date) : null,
-    category: "work",
+    category: toTaskCategory(row.category),
+    notes: row.notes ?? "",
+  };
+}
+
+const TASK_COLUMNS_FULL =
+  "id,user_id,task_name,due_date,priority,status,color,duration_minutes,tags,category,notes,created_at,updated_at";
+const TASK_COLUMNS_DURATION =
+  "id,user_id,task_name,due_date,priority,status,color,duration_minutes,created_at,updated_at";
+const TASK_COLUMNS_LEGACY =
+  "id,user_id,task_name,due_date,priority,status,color,created_at,updated_at";
+
+function isMissingColumnErrorFor(
+  error: { message?: string; code?: string },
+  columns: string[]
+): boolean {
+  const message = error.message ?? "";
+  const mentionsColumn = columns.some((column) =>
+    message.toLowerCase().includes(column.toLowerCase())
+  );
+  return (
+    mentionsColumn ||
+    (error.code === "PGRST204" && !message)
+  );
+}
+
+function isMissingTaskDetailsColumnError(error: { message?: string; code?: string }): boolean {
+  return isMissingColumnErrorFor(error, [
+    "duration_minutes",
+    "tags",
+    "category",
+    "notes",
+  ]);
+}
+
+function isMissingOptionalTaskDetailsColumnError(error: {
+  message?: string;
+  code?: string;
+}): boolean {
+  return (
+    isMissingTaskDetailsColumnError(error) &&
+    !isMissingColumnErrorFor(error, ["duration_minutes"])
+  );
+}
+
+function buildTaskBasePayload(task: Task) {
+  return {
+    task_name: task.title,
+    due_date: task.dueDate ? task.dueDate.toISOString() : null,
+    priority: taskPriorityToInt(task.priority),
+    status: task.completed ? "completed" : "pending",
+    color: hexToColorInt("#5B8DEF"),
+  };
+}
+
+function buildTaskDetailsPayload(task: Task) {
+  return {
+    duration_minutes: Math.max(1, Math.round(task.duration || 30)),
+    tags: task.tags,
+    category: task.category,
+    notes: task.notes ?? "",
+  };
+}
+
+function buildTaskDurationPayload(task: Task) {
+  return {
+    duration_minutes: Math.max(1, Math.round(task.duration || 30)),
   };
 }
 
 export async function fetchTasks(): Promise<Task[]> {
+  const userId = await getCurrentUserId();
+  const localDetails = readLocalTaskDetails(userId);
   const { data, error } = await supabase
     .from("tasks")
-    .select(
-      "id,user_id,task_name,due_date,priority,status,color,created_at,updated_at"
-    )
+    .select(TASK_COLUMNS_FULL)
     .order("created_at", { ascending: false });
+
+  if (error && isMissingTaskDetailsColumnError(error)) {
+    const durationOnly = await supabase
+      .from("tasks")
+      .select(TASK_COLUMNS_DURATION)
+      .order("created_at", { ascending: false });
+    if (!durationOnly.error) {
+      return mergeLocalTaskDetails(
+        ((durationOnly.data || []) as TasksRow[]).map(taskFromRow),
+        localDetails
+      );
+    }
+    if (
+      durationOnly.error &&
+      !isMissingColumnErrorFor(durationOnly.error, ["duration_minutes"])
+    ) {
+      throw durationOnly.error;
+    }
+
+    const legacy = await supabase
+      .from("tasks")
+      .select(TASK_COLUMNS_LEGACY)
+      .order("created_at", { ascending: false });
+    if (legacy.error) throw legacy.error;
+    return mergeLocalTaskDetails(
+      ((legacy.data || []) as TasksRow[]).map(taskFromRow),
+      localDetails
+    );
+  }
+
   if (error) throw error;
-  return ((data || []) as TasksRow[]).map(taskFromRow);
+  return mergeLocalTaskDetails(
+    ((data || []) as TasksRow[]).map(taskFromRow),
+    localDetails
+  );
 }
 
-const TASK_COLUMNS =
-  "id,user_id,task_name,due_date,priority,status,color,created_at,updated_at";
-
 export async function insertTask(task: Task, userId: string) {
-  return insertWithUniqueIntegerId(
-    "tasks",
-    nextTasksTableId,
-    (id) => {
-      const base = {
-        user_id: userId,
-        task_name: task.title,
-        due_date: task.dueDate ? task.dueDate.toISOString() : null,
-        priority: taskPriorityToInt(task.priority),
-        status: task.completed ? "completed" : "pending",
-        color: hexToColorInt("#5B8DEF"),
-      };
-      return id === undefined ? base : { id, ...base };
-    },
-    TASK_COLUMNS,
-    (row) => taskFromRow(row as TasksRow)
-  );
+  const insertWithColumns = (
+    detailLevel: "full" | "duration" | "legacy",
+    select: string
+  ) =>
+    insertWithUniqueIntegerId(
+      "tasks",
+      nextTasksTableId,
+      (id) => {
+        const base = { ...buildTaskBasePayload(task), user_id: userId };
+        const row =
+          detailLevel === "full"
+            ? { ...base, ...buildTaskDetailsPayload(task) }
+            : detailLevel === "duration"
+              ? { ...base, ...buildTaskDurationPayload(task) }
+              : base;
+        return id === undefined ? row : { id, ...row };
+      },
+      select,
+      (row) => taskFromRow(row as TasksRow)
+    );
+
+  let saved: Task;
+  try {
+    saved = await insertWithColumns("full", TASK_COLUMNS_FULL);
+  } catch (err) {
+    if (!isMissingTaskDetailsColumnError(err as { message?: string; code?: string })) {
+      throw err;
+    }
+    try {
+      saved = await insertWithColumns("duration", TASK_COLUMNS_DURATION);
+    } catch (durationErr) {
+      if (
+        !isMissingColumnErrorFor(
+          durationErr as { message?: string; code?: string },
+          ["duration_minutes"]
+        )
+      ) {
+        throw durationErr;
+      }
+      saved = await insertWithColumns("legacy", TASK_COLUMNS_LEGACY);
+    }
+  }
+  await saveLocalTaskDetails({ ...task, id: saved.id }, userId);
+
+  return (async () => {
+    try {
+      await updateTaskRow({ ...task, id: saved.id });
+      return { ...saved, ...task, id: saved.id };
+    } catch (err) {
+      if (
+        isMissingOptionalTaskDetailsColumnError(
+          err as { message?: string; code?: string }
+        )
+      ) {
+        return { ...saved, ...task, id: saved.id };
+      }
+      throw err;
+    }
+  })();
 }
 
 export async function updateTaskRow(merged: Task) {
   const id = Number(merged.id);
   if (!Number.isFinite(id)) throw new Error("Invalid task id");
+  await saveLocalTaskDetails(merged);
+  const basePayload = {
+    task_name: merged.title,
+    due_date: merged.dueDate ? merged.dueDate.toISOString() : null,
+    priority: taskPriorityToInt(merged.priority),
+    status: merged.completed ? "completed" : "pending",
+    updated_at: new Date().toISOString(),
+  };
+  const payloads = [
+    { ...basePayload, ...buildTaskDetailsPayload(merged) },
+    { ...basePayload, ...buildTaskDurationPayload(merged) },
+    basePayload,
+  ];
+  let lastError: Error | null = null;
+
+  for (const payload of payloads) {
+    const { data, error } = await supabase
+      .from("tasks")
+      .update(payload)
+      .eq("id", id)
+      .select("id,status")
+      .maybeSingle();
+
+    if (!error && data) return;
+    if (error && isMissingOptionalTaskDetailsColumnError(error)) {
+      lastError = error;
+      continue;
+    }
+    if (error && isMissingColumnErrorFor(error, ["duration_minutes"])) {
+      continue;
+    }
+    if (error) throw error;
+    if (!data) {
+      throw new Error(
+        "Task update affected 0 rows (wrong id, RLS, or missing profile for user_id)"
+      );
+    }
+  }
+
+  if (lastError) {
+    throw new Error(
+      `Could not save all task details. Run starter-backend/supabase/tasks_details.sql in Supabase, then reload the API schema. (${lastError.message})`
+    );
+  }
+
   const { data, error } = await supabase
     .from("tasks")
-    .update({
-      task_name: merged.title,
-      due_date: merged.dueDate ? merged.dueDate.toISOString() : null,
-      priority: taskPriorityToInt(merged.priority),
-      status: merged.completed ? "completed" : "pending",
-      updated_at: new Date().toISOString(),
-    })
+    .update(basePayload)
     .eq("id", id)
     .select("id,status")
     .maybeSingle();
@@ -503,4 +760,5 @@ export async function deleteTaskRow(id: string) {
   if (!Number.isFinite(n)) throw new Error("Invalid task id");
   const { error } = await supabase.from("tasks").delete().eq("id", n);
   if (error) throw error;
+  await deleteLocalTaskDetails(id);
 }
