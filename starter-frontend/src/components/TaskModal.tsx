@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, Trash2, Clock, Calendar as CalendarIcon, Tag as TagIcon, AlertCircle } from "lucide-react";
+import { X, Trash2, Clock, Calendar as CalendarIcon, Tag as TagIcon, AlertCircle, Folder } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -22,6 +22,7 @@ export function TaskModal({ open, onClose, task, onSave, onDelete }: TaskModalPr
   const [priority, setPriority] = useState<"low" | "medium" | "high">("medium");
   const [duration, setDuration] = useState("30");
   const [dueDate, setDueDate] = useState("");
+  const [category, setCategory] = useState<Task["category"]>("work");
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -31,13 +32,16 @@ export function TaskModal({ open, onClose, task, onSave, onDelete }: TaskModalPr
       setPriority(task.priority);
       setDuration(task.duration.toString());
       setDueDate(task.dueDate ? format(task.dueDate, "yyyy-MM-dd") : "");
+      setCategory(task.category);
       setTags(task.tags.join(", "));
+      setNotes(task.notes ?? "");
     } else {
       // Reset form
       setTitle("");
       setPriority("medium");
       setDuration("30");
       setDueDate("");
+      setCategory("work");
       setTags("");
       setNotes("");
     }
@@ -57,7 +61,8 @@ export function TaskModal({ open, onClose, task, onSave, onDelete }: TaskModalPr
         .filter(Boolean),
       duration: parseInt(duration) || 30,
       dueDate: dueDate ? new Date(dueDate) : null,
-      category: "work",
+      category,
+      notes: notes.trim(),
     };
 
     onSave(newTask);
@@ -163,19 +168,44 @@ export function TaskModal({ open, onClose, task, onSave, onDelete }: TaskModalPr
             </div>
           </div>
 
-          {/* Due Date */}
-          <div>
-            <Label htmlFor="due-date" className="flex items-center gap-2">
-              <CalendarIcon className="w-4 h-4" />
-              Due Date
-            </Label>
-            <Input
-              id="due-date"
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              className="mt-2"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            {/* Due Date */}
+            <div>
+              <Label htmlFor="due-date" className="flex items-center gap-2">
+                <CalendarIcon className="w-4 h-4" />
+                Due Date
+              </Label>
+              <Input
+                id="due-date"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="mt-2"
+              />
+            </div>
+
+            {/* Category */}
+            <div>
+              <Label htmlFor="category" className="flex items-center gap-2">
+                <Folder className="w-4 h-4" />
+                Category
+              </Label>
+              <Select
+                value={category}
+                onValueChange={(value) => setCategory(value as Task["category"])}
+              >
+                <SelectTrigger id="category" className="mt-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="work">Work</SelectItem>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="meeting">Meeting</SelectItem>
+                  <SelectItem value="focus">Focus</SelectItem>
+                  <SelectItem value="break">Break</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Tags */}
