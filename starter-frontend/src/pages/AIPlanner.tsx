@@ -49,12 +49,13 @@ export function AIPlanner() {
   const [messages, setMessages] = useState<{role: 'user' | 'assistant', content: string, actions?: any[]}[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  //const scrollRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
   }, [messages, isTyping]);
 
   // ============================================================================
@@ -644,8 +645,9 @@ export function AIPlanner() {
               </div>
 
               {/* Messages Area */}
-              <ScrollArea className="flex-1 p-6">
-                <div className="space-y-4 pr-4" ref={scrollRef}>
+              <div className="flex-1 overflow-hidden">
+                <ScrollArea className="h-full px-6 py-4">
+                  <div className="space-y-4 pr-4">
                   {messages.length === 0 && (
                     <div className="text-center py-12">
                       <div className="w-16 h-16 rounded-full bg-accent flex items-center justify-center mx-auto mb-4">
@@ -760,9 +762,10 @@ export function AIPlanner() {
                       </div>
                     </div>
                   )}
+                  <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
-
+            </div>
               {/* Input Area */}
               <div className="p-4 border-t border-border bg-accent/10">
                 <form onSubmit={handleSendMessage} className="flex gap-2">
