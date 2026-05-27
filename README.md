@@ -10,7 +10,7 @@ An AI-powered scheduling assistant designed to help college students manage thei
 **Backend:** Node.js, Express.js  
 **Database:** SQLite (via better-sqlite3)  
 **Auth:** Supabase (Google OAuth)  
-**ML/AI:** Azure Machine Learning (planned)
+**ML/AI:** Google Gemini
 
 ---
 
@@ -103,10 +103,8 @@ Backend runs on `http://localhost:3001`
 - [x] Event creation and deletion
 - [x] Assignment management (add, update, complete)
 - [x] SQLite persistent storage
-- [ ] Google login via Supabase
-- [ ] Class schedule import (.ics)
-- [ ] AI-generated optimized schedule
-- [ ] Canvas / Google Calendar sync
+- [x] Google login via Supabase
+- [x] AI-generated optimized schedule
 
 ---
 
@@ -138,5 +136,5 @@ This project uses a PR-based workflow.
 | Frontend | Jessica, Xander, Dana |
 | Backend | Stephanie, Dana, Sid |
 | AI/ML | Sid, Jessica, Dana |
-| Project Lead | Rotating monthly |
+| Project Lead | Stephanie |
 | Guide | Medha |
