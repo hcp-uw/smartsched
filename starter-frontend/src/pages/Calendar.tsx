@@ -45,6 +45,7 @@ export function Calendar() {
     acceptAISchedule,
     clearAISchedule,
     getVisibleEvents,
+    schedulePreferences,
   } = useApp();
 
   // ============================================================================
@@ -127,15 +128,20 @@ export function Calendar() {
   // AI SCHEDULING LOGIC
   // ============================================================================
   const handleGenerateAIPlan = () => {
+    const planStartDate = viewMode === "week" ? weekStart : currentDate;
+    const planDays = viewMode === "day" ? 1 : viewMode === "week" ? 7 : 7;
+
     // Use AI scheduler utility to generate schedule
     const aiSchedule = generateAISchedule({
       tasks: tasks.filter((t) => !t.completed),
       existingEvents: events,
       calendars,
       preferences: {
-        workHoursStart: 9,
-        workHoursEnd: 17,
+        schedulePreferences,
         maxTasksPerDay: 5,
+        startDate: planStartDate,
+        daysAhead: planDays,
+        includeRoutineEvents: true,
       },
     });
 
@@ -146,11 +152,15 @@ export function Calendar() {
     toast.success("AI schedule generated!");
   };
 
-  const handleAcceptAIPlan = () => {
-    acceptAISchedule();
-    setShowAISuggestions(false);
-    setShowAIPanel(false);
-    toast.success("AI schedule added to your calendar!");
+  const handleAcceptAIPlan = async () => {
+    try {
+      await acceptAISchedule();
+      setShowAISuggestions(false);
+      setShowAIPanel(false);
+      toast.success("AI schedule added to your calendar!");
+    } catch {
+      toast.error("Could not add AI schedule to your calendar.");
+    }
   };
 
   const handleRegenerateAIPlan = () => {

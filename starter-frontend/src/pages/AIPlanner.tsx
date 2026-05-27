@@ -7,12 +7,21 @@ import { Input } from "../components/ui/input";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { motion, AnimatePresence } from "motion/react";
-import { startOfDay, addDays, startOfWeek, format } from "date-fns";
+import { format } from "date-fns";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import { generateAISchedule, filterTasksForScheduling } from "../utils/aiScheduler";
 import { chat } from "../services/ai";
-import { VisualWeekScheduler, VisualBlock } from "../components/VisualWeekScheduler";
+import { SchedulePreferencesEditor } from "../components/SchedulePreferencesEditor";
+import { dayNameToDayIndex } from "../lib/schedulePreferences";
+
+const startOfLocalDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const dateFromInputValue = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return startOfLocalDay(new Date());
+  return new Date(year, month - 1, day);
+};
 
 export function AIPlanner() {
   // ============================================================================
@@ -29,6 +38,8 @@ export function AIPlanner() {
     updateEvent,
     deleteEvent,
     updateTask,
+    schedulePreferences,
+    saveSchedulePreferences,
   } = useApp();
 
   // ============================================================================
@@ -37,8 +48,11 @@ export function AIPlanner() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
   const [activeTab, setActiveTab] = useState("optimizer");
-  
-  const [visualBlocks, setVisualBlocks] = useState<VisualBlock[]>([]);
+  const [plannerPreferences, setPlannerPreferences] = useState(schedulePreferences);
+  const [selectedPreferenceDay, setSelectedPreferenceDay] = useState("Monday");
+  const [isSavingPreferences, setIsSavingPreferences] = useState(false);
+  const [planStartDate, setPlanStartDate] = useState(() => startOfLocalDay(new Date()));
+  const [planDays, setPlanDays] = useState(1);
   
   // Filter states
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -50,6 +64,10 @@ export function AIPlanner() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setPlannerPreferences(schedulePreferences);
+  }, [schedulePreferences]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -94,61 +112,18 @@ export function AIPlanner() {
   // AI SCHEDULING LOGIC
   // ============================================================================
   const handleGenerateSchedule = async () => {
-    if (filteredTasks.length === 0) {
-      toast.error("No tasks match your filters. Adjust filters to include more tasks.");
-      return;
-    }
-
     setIsGenerating(true);
     
     try {
-      // 1. Prepare data for the program (local utility)
-      // Extract preferences from visual blocks
-      const workBlocks = visualBlocks.filter(b => b.type === 'work');
-      const freeBlocks = visualBlocks.filter(b => b.type === 'free');
-      const busyBlocks = visualBlocks.filter(b => b.type === 'busy');
-
-      const applyBlockTime = (date: Date, hour: number) => {
-        const wholeHours = Math.floor(hour);
-        const minutes = Math.round((hour - wholeHours) * 60);
-        date.setHours(wholeHours, minutes, 0, 0);
-      };
-
-      // Helper to convert visual block to Date slots for current week
-      const blockToSlots = (blocks: VisualBlock[]) => {
-        const today = startOfDay(new Date());
-        const weekStart = startOfWeek(today, { weekStartsOn: 1 }); // Monday
-
-        return blocks.map(b => {
-          // b.day is 0-6 (Sun-Sat)
-          // Adjust for Monday start if necessary, but startOfWeek(..., {weekStartsOn: 1}) gives Monday.
-          // If b.day is 1 (Mon), it should be weekStart + 0 days.
-          // If b.day is 0 (Sun), it should be weekStart + 6 days.
-          let dayOffset = b.day === 0 ? 6 : b.day - 1;
-          const blockDate = addDays(weekStart, dayOffset);
-          
-          const start = new Date(blockDate);
-          applyBlockTime(start, b.startHour);
-          
-          const end = new Date(blockDate);
-          applyBlockTime(end, b.endHour);
-          
-          return { start, end };
-        });
-      };
-
-      // For programmatic scheduler, we still need workDays and workHours
-      // We can derive them from work blocks or adapt the scheduler
-      const workDays = Array.from(new Set(workBlocks.map(b => b.day)));
-      
       const preferences = {
-        // Fallback work hours if no work blocks defined
-        workHoursStart: workBlocks.length > 0 ? Math.min(...workBlocks.map(b => b.startHour)) : 9,
-        workHoursEnd: workBlocks.length > 0 ? Math.max(...workBlocks.map(b => b.endHour)) : 17,
-        workDays: workDays.length > 0 ? workDays : [1, 2, 3, 4, 5],
-        busySlots: blockToSlots(busyBlocks),
-        freeSlots: blockToSlots(freeBlocks),
+        schedulePreferences: plannerPreferences,
+        workDays: Object.entries(plannerPreferences)
+          .filter(([, preference]) => preference.enabled)
+          .map(([day]) => dayNameToDayIndex(day)),
         maxTasksPerDay: 5,
+        startDate: planStartDate,
+        daysAhead: planDays,
+        includeRoutineEvents: true,
       };
 
       // 2. Initial programmatic generation
@@ -164,19 +139,29 @@ export function AIPlanner() {
       const llmPrompt = `I have generated an initial schedule for the user based on these tasks:
       ${JSON.stringify(filteredTasks.map(t => ({ title: t.title, priority: t.priority, duration: t.duration })))}
       
-      And these constraints (Visual Blocks):
-      Work Blocks: ${JSON.stringify(workBlocks.map(b => ({ day: b.day, start: b.startHour, end: b.endHour })))}
-      Free Blocks: ${JSON.stringify(freeBlocks.map(b => ({ day: b.day, start: b.startHour, end: b.endHour })))}
-      Busy Blocks: ${JSON.stringify(busyBlocks.map(b => ({ day: b.day, start: b.startHour, end: b.endHour })))}
+      And these profile schedule preferences:
+      ${JSON.stringify(plannerPreferences)}
+
+      Schedule range:
+      ${format(planStartDate, "yyyy-MM-dd")} for ${planDays} day(s)
       
       Initial generated events:
       ${JSON.stringify(aiSchedule.map(e => ({ title: e.title, start: e.start, end: e.end })))}
+
+      The generated calendar should only include Morning Routine, Lunch Time, and scheduled task chunks.
+      Do not add Work Time or Personal Time blocks.
+      If a task is split across multiple calendar chunks, that split is only for the calendar view; do not suggest changing the task's to-do duration.
       
       Does this schedule look optimal? If you have suggestions for improvement, please let me know.
       Respond with "The schedule looks good" or provide suggestions. 
       Limit your response to 50 words.`;
 
-      const llmResponse = await chat(llmPrompt, { history: [] });
+      const llmResponse = await chat(llmPrompt, {
+        history: [],
+        tasks: filteredTasks.map(t => ({ id: t.id, title: t.title, completed: t.completed, priority: t.priority, duration: t.duration, dueDate: t.dueDate })),
+        events: aiSchedule.map(e => ({ id: e.id, title: e.title, start: e.start, end: e.end })),
+        schedulePreferences: plannerPreferences,
+      });
 
       // Update state through context
       setAIGeneratedEvents(aiSchedule);
@@ -190,7 +175,7 @@ export function AIPlanner() {
         ...prev, 
         { 
           role: 'assistant', 
-          content: `I've generated an optimized schedule based on your work hours and preferences! \n\n**Expert Analysis:** ${llmResponse.response}\n\nYou can see the preview in the Optimizer tab. Would you like to tweak anything here?` 
+          content: `I've generated a complete ${planDays}-day schedule based on your routines, work hours, and tasks. \n\n**Expert Analysis:** ${llmResponse.response}\n\nYou can see the preview in the Optimizer tab. Would you like to tweak anything here?` 
         }
       ]);
 
@@ -201,10 +186,14 @@ export function AIPlanner() {
     }
   };
 
-  const handleAcceptSchedule = () => {
-    acceptAISchedule();
-    toast.success("Schedule added to your calendar!");
-    setHasGenerated(false);
+  const handleAcceptSchedule = async () => {
+    try {
+      await acceptAISchedule();
+      toast.success("Schedule added to your calendar!");
+      setHasGenerated(false);
+    } catch {
+      toast.error("Could not add schedule to your calendar.");
+    }
   };
 
   const handleRegenerate = () => {
@@ -225,6 +214,7 @@ export function AIPlanner() {
       const context = {
         tasks: tasks.map(t => ({ id: t.id, title: t.title, completed: t.completed, priority: t.priority, duration: t.duration, dueDate: t.dueDate })),
         events: events.map(e => ({ id: e.id, title: e.title, start: e.start, end: e.end })),
+        schedulePreferences: plannerPreferences,
         history: messages.slice(-10).map(m => ({ role: m.role, content: m.content.replace(/```json-actions[\s\S]*?```/g, "").trim() }))
       };
       
@@ -259,6 +249,19 @@ export function AIPlanner() {
     toast.success("Conversation context cleared.");
   };
 
+  const handleSavePlannerPreferences = async () => {
+    setIsSavingPreferences(true);
+    try {
+      await saveSchedulePreferences(plannerPreferences);
+      toast.success("Schedule preferences saved.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Saved locally, but cloud sync needs the schedule_preferences migration.");
+    } finally {
+      setIsSavingPreferences(false);
+    }
+  };
+
   const handleApproveAction = (action: any, messageIdx: number, actionIdx: number) => {
     try {
       switch (action.type) {
@@ -272,6 +275,10 @@ export function AIPlanner() {
           });
           break;
         case 'update_event':
+          if (!events.some((event) => event.id === action.payload.id)) {
+            toast.error("That event no longer exists. Ask the assistant to look up the current schedule.");
+            return;
+          }
           updateEvent(action.payload.id, {
             ...action.payload.updates,
             ...(action.payload.updates.start && { start: new Date(action.payload.updates.start) }),
@@ -279,9 +286,17 @@ export function AIPlanner() {
           });
           break;
         case 'delete_event':
+          if (!events.some((event) => event.id === action.payload.id)) {
+            toast.error("That event no longer exists. Ask the assistant to look up the current schedule.");
+            return;
+          }
           deleteEvent(action.payload.id);
           break;
         case 'update_task':
+          if (!tasks.some((task) => task.id === action.payload.id)) {
+            toast.error("That task no longer exists. Ask the assistant to look up the current task list.");
+            return;
+          }
           updateTask(action.payload.id, action.payload.updates);
           break;
         default:
@@ -390,13 +405,13 @@ export function AIPlanner() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 }}
-                  className="bg-card border border-border rounded-2xl p-6"
+                  className="space-y-5"
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
                     <div>
-                      <h2 className="text-2xl font-semibold">Week View</h2>
+                      <h2 className="text-2xl font-semibold">Scheduling Preferences</h2>
                       <p className="text-sm text-muted-foreground">
-                        Draw work, free, and busy blocks, then generate a plan from the matching task set.
+                        Choose a day range, tune daily preferences, then generate a complete calendar-ready plan.
                       </p>
                     </div>
                     <Button
@@ -418,8 +433,52 @@ export function AIPlanner() {
                     </Button>
                   </div>
 
-                  <div className="h-[680px] min-h-[560px] rounded-xl bg-background">
-                    <VisualWeekScheduler blocks={visualBlocks} onChange={setVisualBlocks} />
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_160px_auto] md:items-end">
+                      <div>
+                        <Label htmlFor="plan-start-date" className="text-sm">
+                          Start date
+                        </Label>
+                        <Input
+                          id="plan-start-date"
+                          type="date"
+                          value={format(planStartDate, "yyyy-MM-dd")}
+                          onChange={(event) => setPlanStartDate(dateFromInputValue(event.target.value))}
+                          className="mt-2 bg-input-background"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="plan-days" className="text-sm">
+                          Days
+                        </Label>
+                        <Input
+                          id="plan-days"
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={planDays}
+                          onChange={(event) => {
+                            const next = Number(event.target.value);
+                            setPlanDays(Number.isFinite(next) ? Math.max(1, Math.min(next, 31)) : 1);
+                          }}
+                          className="mt-2 bg-input-background"
+                        />
+                      </div>
+                      <div className="text-sm text-muted-foreground md:pb-2">
+                        Generates routine blocks and scheduled tasks for the selected range.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-background">
+                    <SchedulePreferencesEditor
+                      preferences={plannerPreferences}
+                      selectedDay={selectedPreferenceDay}
+                      onSelectedDayChange={setSelectedPreferenceDay}
+                      onChange={setPlannerPreferences}
+                      onSave={handleSavePlannerPreferences}
+                      saving={isSavingPreferences}
+                    />
                   </div>
 
                   <div className="mt-5 rounded-xl border border-border bg-accent/20 p-4">
@@ -517,7 +576,7 @@ export function AIPlanner() {
                         <div>
                           <h2 className="text-xl font-semibold">Schedule Generated!</h2>
                           <p className="text-sm text-muted-foreground">
-                            I've optimized {filteredTasks.length} tasks based on your preferences
+                            Generated a complete schedule for {planDays} day{planDays === 1 ? "" : "s"} with {filteredTasks.length} matching task{filteredTasks.length === 1 ? "" : "s"}
                           </p>
                         </div>
                       </div>
